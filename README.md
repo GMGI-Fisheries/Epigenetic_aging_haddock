@@ -1,2 +1,3 @@
-# Epigenetic_aging_haddock
-Building an 'epigenetic clock' using whole genome bisulfite sequencing to predict age in haddock
+# Epigenetic Aging
+Development of a method to age fish using the 'epigenetic clock' theory. Work done as postdoctoral scientist at Gloucester Marine Genomics Institute.
+

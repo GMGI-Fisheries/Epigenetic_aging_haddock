@@ -1,0 +1,7 @@
+sample,fastq_1,fastq_2
+Mae-263_REP1,/work/gmgi/Fisheries/epiage/haddock/raw_data/Mae-263_S1_R1_001.fastq.gz,/work/gmgi/Fisheries/epiage/haddock/raw_data/Mae-263_S1_R2_001.fastq.gz
+Mae-266_REP1,/work/gmgi/Fisheries/epiage/haddock/raw_data/Mae-266_S2_R1_001.fastq.gz,/work/gmgi/Fisheries/epiage/haddock/raw_data/Mae-266_S2_R2_001.fastq.gz
+Mae-274_REP1,/work/gmgi/Fisheries/epiage/haddock/raw_data/Mae-274_S3_R1_001.fastq.gz,/work/gmgi/Fisheries/epiage/haddock/raw_data/Mae-274_S3_R2_001.fastq.gz
+Mae-278_REP1,/work/gmgi/Fisheries/epiage/haddock/raw_data/Mae-278_S4_R1_001.fastq.gz,/work/gmgi/Fisheries/epiage/haddock/raw_data/Mae-278_S4_R2_001.fastq.gz
+Mae-281_REP1,/work/gmgi/Fisheries/epiage/haddock/raw_data/Mae-281_S5_R1_001.fastq.gz,/work/gmgi/Fisheries/epiage/haddock/raw_data/Mae-281_S5_R2_001.fastq.gz
+Mae-285_REP1,/work/gmgi/Fisheries/epiage/haddock/raw_data/Mae-285_S6_R1_001.fastq.gz,/work/gmgi/Fisheries/epiage/haddock/raw_data/Mae-285_S6_R2_001.fastq.gz
