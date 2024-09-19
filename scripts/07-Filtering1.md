@@ -26,8 +26,8 @@ Output File: `10x_sorted.tab`
 #SBATCH --cpus-per-task=2
 
 ## set paths 
-sorted_dir="/work/gmgi/Fisheries/epiage/haddock/methylation/sorted"
-out="/work/gmgi/Fisheries/epiage/haddock/methylation/filtered"
+sorted_dir="/work/gmgi/Fisheries/epiage/haddock/methylation/sorted/sorted_cov"
+out="/work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files"
 
 ## Filtering for 10X coverage 
 
@@ -40,21 +40,21 @@ done
 
 ```
 
-`wc -l /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/*10x_sorted.tab > 10X_sample_depth.txt` 
+`wc -l /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/*10x_sorted.tab > 10X_sample_depth2.txt` 
 
-`head 10X_sample_depth.txt`: 
+`head 10X_sample_depth2.txt` (with all 140 samples): 
 
 ```
-    8106281 Mae-263_S1_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
-    7750784 Mae-266_S2_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
-    5480154 Mae-274_S3_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
-    5564938 Mae-278_S4_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
-    7364620 Mae-281_S5_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
-    1381095 Mae-285_S6_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
-    6804915 Mae-293_S7_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
-    8360574 Mae-294_S8_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
-    3999727 Mae-295_S9_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
-    6553835 Mae-298_S10_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
+   8106281 /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/Mae-263_S1_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
+    6772426 /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/Mae-265_S1_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
+    7750784 /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/Mae-266_S2_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
+    4809095 /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/Mae-271_S2_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
+    5480154 /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/Mae-274_S3_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
+    2837964 /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/Mae-275_S3_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
+    5564938 /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/Mae-278_S4_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
+    7364620 /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/Mae-281_S5_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
+    8723102 /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/Mae-282_S4_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
+    5640348 /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/Mae-284_S5_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab
 ```
 
 ## 02. Filter for positions found in 90% of samples
@@ -64,6 +64,8 @@ done
 ### Create file that has the list of C's found in 90% of samples
 
 `14a-create_90p_file.sh` 
+
+I used >125 because 90% is right at 126.
 
 ```
 #!/bin/bash
@@ -84,14 +86,22 @@ cd /work/gmgi/Fisheries/epiage/haddock/methylation/filtered
 
 multiIntersectBed -i *.tab > CpG.all.samps.10x_sorted.bed
 
-cat CpG.all.samps.10x_sorted.bed | awk '$4 > 61' > CpG.filt90.all.samps.10x_sorted.bed 
-cat CpG.all.samps.10x_sorted.bed | awk '$4 == 68' > CpG.filt100.all.samps.10x_sorted.bed 
+#cat CpG.all.samps.10x_sorted.bed | awk '$4 > 61' > CpG.filt90.all.samps.10x_sorted.bed 
+#cat CpG.all.samps.10x_sorted.bed | awk '$4 == 68' > CpG.filt100.all.samps.10x_sorted.bed 
+
+cat CpG.all.samps.10x_sorted2.bed | awk '$4 > 125' > CpG.filt90.all.samps.10x_sorted2.bed 
+cat CpG.all.samps.10x_sorted2.bed | awk '$4 == 140' > CpG.filt100.all.samps.10x_sorted2.bed 
 ```
 
-Number of SNPs at each filer (90% and 100%)
+Number of sites at each filer (90% and 100%)
 
-`wc -l CpG.filt90.all.samps.10x_sorted.bed`: 738,562 
-`wc -l CpG.filt100.all.samps.10x_sorted.bed`: 132,839 
+68 samples:  
+`wc -l CpG.filt90.all.samps.10x_sorted.bed`: 738,562   
+`wc -l CpG.filt100.all.samps.10x_sorted.bed`: 132,839   
+
+140 samples:  
+`wc -l CpG.filt90.all.samps.10x_sorted2.bed`: 808,924 
+`wc -l CpG.filt100.all.samps.10x_sorted2.bed`: 104,685 
 
 
 ### Filter each sample's file to the list found in 90% of samples 
@@ -138,28 +148,36 @@ done
 The output of the command below should have each sample with the same number of sites.
 
 ```
-wc -l *100p_enrichment.bed > 100p_enrichment_sample_size.txt 
-wc -l *90p_enrichment.bed > 90p_enrichment_sample_size.txt
+wc -l 100p_bedfiles/*100p_enrichment2.bed > 100p_enrichment_sample_size2.txt 
+wc -l 90p_bedfiles/*90p_enrichment2.bed > 90p_enrichment_sample_size2.txt
 ```
 
-`head 100p_enrichment_sample_size.txt`: 
+`head 100p_enrichment_sample_size2.txt`: 
 
 ```
-   137694 Mae-263_S1_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment.bed
-   137694 Mae-266_S2_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment.bed
-   137694 Mae-274_S3_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment.bed
-   137694 Mae-278_S4_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment.bed
-   137694 Mae-281_S5_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment.bed
+   108411 100p_bedfiles/Mae-263_S1_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment2.bed
+   108411 100p_bedfiles/Mae-265_S1_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment2.bed
+   108411 100p_bedfiles/Mae-266_S2_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment2.bed
+   108411 100p_bedfiles/Mae-271_S2_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment2.bed
+   108411 100p_bedfiles/Mae-274_S3_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment2.bed
+   108411 100p_bedfiles/Mae-275_S3_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment2.bed
+   108411 100p_bedfiles/Mae-278_S4_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment2.bed
+   108411 100p_bedfiles/Mae-281_S5_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment2.bed
+   108411 100p_bedfiles/Mae-282_S4_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment2.bed
+   108411 100p_bedfiles/Mae-284_S5_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_100p_enrichment2.bed
 ```
 
-`head 90p_enrichment_sample_size.txt`:
-
-This won't be exactly all the same value but shouldn't be less than 738,562. 
+`head 90p_enrichment_sample_size2.txt`:
 
 ```
-    753653 Mae-263_S1_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment.bed
-    751798 Mae-266_S2_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment.bed
-    741638 Mae-274_S3_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment.bed
-    744814 Mae-278_S4_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment.bed
-    753378 Mae-281_S5_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment.bed
+    813743 90p_bedfiles/Mae-263_S1_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment2.bed
+    806298 90p_bedfiles/Mae-265_S1_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment2.bed
+    810093 90p_bedfiles/Mae-266_S2_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment2.bed
+    771553 90p_bedfiles/Mae-271_S2_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment2.bed
+    806551 90p_bedfiles/Mae-274_S3_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment2.bed
+    690469 90p_bedfiles/Mae-275_S3_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment2.bed
+    804723 90p_bedfiles/Mae-278_S4_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment2.bed
+    816508 90p_bedfiles/Mae-281_S5_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment2.bed
+    817538 90p_bedfiles/Mae-282_S4_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment2.bed
+    786136 90p_bedfiles/Mae-284_S5_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov_10x_sorted.tab_CpG_10x_90p_enrichment2.bed
 ```

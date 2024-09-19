@@ -60,31 +60,33 @@ $ wget hftp://ftp.ebi.ac.uk/pub/databases/ena/wgs/public/olk/OLKM01.fasta.gz
 ### Create list of samples 
 
 `ls -d /work/gmgi/Fisheries/epiage/haddock/raw_data/*.gz > rawdata`
-
+`ls -d /work/gmgi/Fisheries/epiage/haddock/raw_data2/*.gz > rawdata`
 
 ## FASTQC Slurm script 
 
 `01-fastqc.sh` (path = /work/gmgi/Fisheries/epiage/haddock/scripts)
 
-*Note from after running - I could have probably decreased the mem GB limit* 
+raw_data was sequence round 1 Fall 2023 and raw_data2 was Summer 2024.
 
 ```
 #!/bin/bash
-#SBATCH --error=fastqc_output/"%x_error.%j" #if your job fails, the error report will be put in this file
-#SBATCH --output=output_messages/"%x_output.%j" #once your job is completed, any final job report comments will be put in this file
+#SBATCH --error=fastqc_output2/"%x_error.%j" #if your job fails, the error report will be put in this file
+#SBATCH --output=fastqc_output2/"%x_output.%j" #once your job is completed, any final job report comments will be put in this file
 #SBATCH --partition=short
 #SBATCH --nodes=1
 #SBATCH --time=23:00:00
 #SBATCH --job-name=fastqc
-#SBATCH --mem=30GB
+#SBATCH --mem=5GB
 #SBATCH --ntasks=24
 #SBATCH --cpus-per-task=2
 
 module load OpenJDK/19.0.1 ## dependency on NU Discovery cluster 
 module load fastqc/0.11.9
 
-raw_path="/work/gmgi/Fisheries/epiage/haddock/raw_data"
+raw_path="/work/gmgi/Fisheries/epiage/haddock/raw_data2"
 dir="/work/gmgi/Fisheries/epiage/haddock/QC/raw_fastqc"
+
+ls -d ${raw_path}/*.gz > rawdata
 
 ## File name based on rawdata list
 mapfile -t FILENAMES < ${raw_path}/rawdata
@@ -94,7 +96,7 @@ i=${FILENAMES[$SLURM_ARRAY_TASK_ID]}
 fastqc ${i} --outdir ${dir}
 ```
 
-To run slurm array = `sbatch --array=0-136 01-fastqc.sh`.
+To run slurm array = `sbatch --array=0-136 01-fastqc.sh` (raw_data) and `sbatch --array=1-144 01-fastqc.sh`.
 
 This is going to output *many* error and output files. After job completes, use `cat *output.* > ../fastqc_output.txt` to create one file with all the output and `cat *error.* > ../fastqc_error.txt` to create one file with all of the error message outputs. Use `rm *output.*` and `rm *error.*` to remove all individual files once happy with the output and error txt files. Make sure to keep the periods to distinguish between the created .txt file and individual error/output files. 
 

@@ -51,10 +51,12 @@ df_spread <- df %>% dplyr::select(sample, AgeRounded, Loc, percent.meth) %>% spr
 ### 1. removing sites with low variance (74,557)
 nzv.cpg.list <- nearZeroVar(df_spread, freqCut = 85/15, uniqueCut = 50, allowParallel = TRUE) 
 df_spread_filteredDescr <- df_spread[, -nzv.cpg.list]
+
 ### 2. removing sites that are highly correlated with each other (466,392) therefore 28,522 sites left
 filteredDescr_matrix <- df_spread_filteredDescr %>% dplyr::select(-sample, -AgeRounded) 
 highlyCorDescr <- findCorrelation(filteredDescr_matrix, cutoff = 0.8)  
 df_spread_filteredDescr_cor <- df_spread_filteredDescr[,-highlyCorDescr]
+
 ### creating list from the df above 
 df_spread_filteredDescr_cor_list <- df_spread_filteredDescr_cor %>% gather("Loc", "percent.meth", 1:28522) %>%
   dplyr::select(Loc) %>% distinct()

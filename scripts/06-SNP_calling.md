@@ -117,11 +117,11 @@ Step 1: Merge bam files `BSSnper-01_mergefile.sh`
 module load samtools/1.19.2
 
 # set paths 
-sorted_dedup="/work/gmgi/Fisheries/epiage/haddock/methylation/sorted"
+sorted_dedup="/work/gmgi/Fisheries/epiage/haddock/methylation/sorted/sorted_bam"
 output="/work/gmgi/Fisheries/epiage/haddock/SNP"
 
 # Merge Samples with SAMtools
-samtools merge ${output}/BS_SNPer_merged.bam ${sorted_dedup}/*deduplicated.bam_sorted.bam
+samtools merge ${output}/BS_SNPer_merged2.bam ${sorted_dedup}/*deduplicated.bam_sorted.bam
 ```
 
 Step 2: `BSSnper-02_run.sh`
@@ -166,8 +166,8 @@ perl /work/gmgi/packages/BS-Snper-master/BS-Snper.pl ${snp_folder}/BS_SNPer_merg
 - `SNP-candidates.out`  
 - `merged.ERR.log`  
 
-Counting number of lines in vcf file: `wc -l SNP-results.vcf` (3,681,270).
-Counting number of lines in .out file: `wc -l SNP-candidates.out` (6,918,915).
+Counting number of lines in vcf file: `wc -l SNP-results2.vcf` (version 1 = 3,681,270; version 2 = 3,880,864).
+Counting number of lines in .out file: `wc -l SNP-candidates2.out` (version 1 = 6,918,915; version 2 = 7,140,723).
 
 `.tab` file outputs:  
 	1. CHROM: Chromosome.
@@ -183,8 +183,9 @@ Counting number of lines in .out file: `wc -l SNP-candidates.out` (6,918,915).
 Filter for CT SNPs 
 
 `grep $'C\tT' SNP-results.vcf  >  CT-SNP.vcf`  
+`grep $'C\tT' SNP-results2.vcf  >  CT-SNP2.vcf`  
 `wc -l CT-SNP.vcf` 420,362. This file doesn't include the headers that vcf file does so 420,362 potential SNPs in this dataset. 
-
+`wc -l CT-SNP2.vcf` 442,485.  
 
 ### old notes 
 

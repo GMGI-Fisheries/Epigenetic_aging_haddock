@@ -56,8 +56,8 @@ Zymo Pico Methyl-Seq Library Kit is `non-directional`.
 
 ```
 #!/bin/bash
-#SBATCH --error=align_output/"%x_error.%a" #if your job fails, the error report will be put in this file
-#SBATCH --output=align_output/"%x_output.%a" #once your job is completed, any final job report comments will be put in this file
+#SBATCH --error=align_output2/"%x_error.%a" #if your job fails, the error report will be put in this file
+#SBATCH --output=align_output2/"%x_output.%a" #once your job is completed, any final job report comments will be put in this file
 #SBATCH --partition=long
 #SBATCH --nodes=1
 #SBATCH --time=120:00:00
@@ -72,15 +72,15 @@ module load samtools/1.9
 
 ## Set paths
 genome_folder="/work/gmgi/Fisheries/reference_genomes/Haddock"
-trimmed_path="/work/gmgi/Fisheries/epiage/haddock/trimmed_data"
-out_dir="/work/gmgi/Fisheries/epiage/haddock/methylation/aligned/"
+trimmed_path="/work/gmgi/Fisheries/epiage/haddock/trimmed_data2"
+out_dir="/work/gmgi/Fisheries/epiage/haddock/methylation/aligned2/"
 
 ## File name based on R1 list
 mapfile -t FILENAMES < ${trimmed_path}/trimmed_R1_files
 FQ1=${FILENAMES[$SLURM_ARRAY_TASK_ID]}
 FQ2=$(echo $FQ1 | sed 's/R1/R2/' | sed 's/val_1/val_2/')
 
-cd /work/gmgi/Fisheries/epiage/haddock/methylation/aligned/
+cd /work/gmgi/Fisheries/epiage/haddock/methylation/aligned2/
 
 ## Bismark align
 bismark \
@@ -94,7 +94,9 @@ bismark \
 
 ```
 
-To run slurm array = `sbatch --array=0-68 06-bismark_align.sh`.
+To run slurm array = `sbatch --array=0-68 06-bismark_align.sh` and `sbatch --array=0-71 06-bismark_align.sh`
+
+Check error file of each sample to confirm the align function worked. The bottom of the report will have the total processing time and will say completed.
 
 ## Bismark Deduplicate
 
@@ -131,7 +133,7 @@ deduplicate_bismark --bam --paired ${i}
 
 ```
 
-To run slurm array = `sbatch --array=0-67 07-bismark_deduplicate.sh`.
+To run slurm array = `sbatch --array=0-67 07-bismark_deduplicate.sh` and `sbatch --array=0-71 07-bismark_deduplicate.sh`
 
 Notes:  
 - Check output of FILESNAMES list: `echo ${FILENAMES[0]}` for individual file, `echo ${FILENAMES[@]}` for list of files
@@ -166,10 +168,10 @@ i=${FILENAMES[$SLURM_ARRAY_TASK_ID]}
 
 cd /work/gmgi/Fisheries/epiage/haddock/methylation/meth_extracted/
 
-bismark_methylation_extractor --bedGraph --paired --counts --scaffolds --report ${i}
+bismark_methylation_extractor --comprehensive --bedGraph --paired --counts --scaffolds --gzip --report ${i}
 ```
 
-To run slurm array = `sbatch --array=0-67 08-bismark_extractor.sh`.
+To run slurm array = `sbatch --array=0-67 08-bismark_extractor.sh` and `sbatch --array=0-71 08-bismark_extractor.sh`
 
 ## Sort Bam 
 
@@ -205,7 +207,7 @@ i=${FILENAMES[$SLURM_ARRAY_TASK_ID]}
 samtools sort ${i} -o ${i}_sorted.bam
 ```
 
-To run slurm array = `sbatch --array=0-67 09-sort_bam.sh`.
+To run slurm array = `sbatch --array=0-67 09-sort_bam.sh` and `sbatch --array=0-71 09-sort_bam.sh`
 
 Move output files to sorted folder. I was having trouble getting the sort function to recognize this. `mv *sorted.bam ../sorted/`. 
 
@@ -277,10 +279,14 @@ To run slurm array = `sbatch --array=0-67 10a-bismark_report.sh`.
 
 module load bismark/0.22.2
 
-out="/work/gmgi/Fisheries/epiage/haddock/methylation/summary"
-align_dir="/work/gmgi/Fisheries/epiage/haddock/methylation/aligned"
+out="/work/gmgi/Fisheries/epiage/haddock/methylation/summary2"
+align_dir="/work/gmgi/Fisheries/epiage/haddock/methylation/aligned2"
+dedup_dir="/work/gmgi/Fisheries/epiage/haddock/methylation/deduplicated2"
+ext_dir="/work/gmgi/Fisheries/epiage/haddock/methylation/meth_extracted2"
 
-bismark2summary ${align_dir}/*bam -o ${out}/haddock_seqrun1_align
+bismark2summary ${align_dir}/*bam -o ${out}/haddock_seqrun2_align
+bismark2summary ${dedup_dir}/*bam -o ${out}/haddock_seqrun2_dedup
+bismark2summary ${ext_dir}/*splitting_report.txt -o ${out}/haddock_seqrun2_ext
 ```
 
 ## PreSeq Reports 
@@ -375,19 +381,34 @@ Load conda environment with multiqc package.
 ```
 cd /work/gmgi/Fisheries/epiage/haddock/methylation/meth_extracted/ 
 
-multiqc . --interactive --filename meth_extract_multiqc_report.html
+multiqc . --interactive --filename meth_extract_multiqc_report2.html
 
 cd /work/gmgi/Fisheries/epiage/haddock/methylation/deduplicated/ 
 
-multiqc . --interactive --filename deduplicated_multiqc_report.html
+multiqc . --interactive --filename deduplicated_multiqc_report2.html
 
 cd /work/gmgi/Fisheries/epiage/haddock/methylation/aligned/ 
 
-multiqc . --interactive --filename aligned_multiqc_report.html
+multiqc . --interactive --filename aligned_multiqc_report2.html
 ```
 
 The one we care about the most includes m-bias and methylation calling (meth extract). 
 
+# Using genozip .bam files to reduce storage space 
+
+Within conda environment `haddock_methylation`, install `genozip`: `conda install genozip`. 
+
+https://www.genozip.com/installing
+
+Create a genozip reference file for the haddock genome: `$ genozip --make-reference Haddock_OLKM01.fasta`
+
+`$ genozip --threads 4 --reference ../../Haddock_OLKM01.ref.genozip myfile.bam`: To zip file.  
+`$ ls -lha myfile.bam*`: To check storage space of all files including hidden files.  
+`$ genounzip --threads 4 myfile.bam.genozip`: To uncompress a file.    
+
+This function can be used for .vcf files too. 
+
+# Nextflow information 
 
 ## Slurm script 
 

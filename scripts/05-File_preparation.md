@@ -50,10 +50,9 @@ cd /work/gmgi/Fisheries/epiage/haddock/methylation/merged
 coverage2cytosine --genome_folder ${genome_folder} --merge_CpG --zero_based -o ${i}_merged.cov ${i}
 ```
 
-To run slurm array = `sbatch --array=0-67 11-merge_strands.sh`.
+To run slurm array = `sbatch --array=0-67 11-merge_strands.sh` and `sbatch --array=0-71 11-merge_strands.sh`
 
 This worked but the naming got messed and produced extra annotations than I originally intended.. e.g. `Mae-378_S29_R1_001_val_1_bismark_bt2_pe.deduplicated.bismark.cov.gz_merged.cov.CpG_report.merged_CpG_evidence.cov`. 
-
 
 ### Overview 
 

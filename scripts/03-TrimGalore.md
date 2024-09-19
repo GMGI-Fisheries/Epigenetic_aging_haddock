@@ -10,7 +10,9 @@ TrimGalore!: https://www.bioinformatics.babraham.ac.uk/projects/trim_galore/
 
 ### List of R1 files 
 
-`ls -d /work/gmgi/Fisheries/epiage/haddock/raw_data/*R1*.gz > R1_files` to create a list of files with R1 in the name to be used in the TrimGalore script below.
+Create a list of files with R1 in the name to be used in the TrimGalore script below:
+- `ls -d /work/gmgi/Fisheries/epiage/haddock/raw_data/*R1*.gz > R1_files`  
+- For sequencing round 2, I added this step within the slurm script 
 
 ### Installing packages on conda 
 
@@ -44,8 +46,10 @@ module load fastqc/0.11.9
 module load trimgalore/0.6.5
 
 ## Set paths
-raw_path="/work/gmgi/Fisheries/epiage/haddock/raw_data"
+raw_path="/work/gmgi/Fisheries/epiage/haddock/raw_data2"
 out="/work/gmgi/Fisheries/epiage/haddock/trimmed_data/"
+
+# ls -d ${raw_path}/*R1*.gz > ${raw_path}/R1_files
 
 ## File name based on R1 list
 mapfile -t FILENAMES < ${raw_path}/R1_files
@@ -64,7 +68,7 @@ trim_galore \
     ${FQ1} ${FQ2}
 ```
 
-To run slurm array = `sbatch --array=0-68 03-TrimGalore.sh`.
+To run slurm array = `sbatch --array=0-68 03-TrimGalore.sh` and `sbatch --array=1-72 03-TrimGalore.sh`. Note after, this needs to start with file 0 otherwise it will skip the first set. I should have used 0-71 instead of 1-72. 
 
 This is going to output *many* error and output files. After job completes, use `cat *output.* > ../TrimGalore_output.txt` to create one file with all the output and `cat *error.* > ../TrimGalore_error.txt` to create one file with all of the error message outputs. Use `rm *output.*` and `rm *error.*` to remove all individual files once happy with the output and error txt files. Make sure to keep the periods to distinguish between the created .txt file and individual error/output files. 
 

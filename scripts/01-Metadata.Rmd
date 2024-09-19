@@ -53,6 +53,26 @@ library(rnaturalearthdata)
 library("ggspatial")
 ```
 
+Looking at catch for smith proposal 
+
+```{r}
+Trawl_data <- read.csv("data/00_metadata/22561_UNION_FSCS_SVLEN.csv")
+
+Trawl_data %>% filter(str_detect(SCIENTIFIC_NAME, "Centropristis striata") |
+                      str_detect(SCIENTIFIC_NAME, "Scomber scombrus") |
+                      str_detect(SCIENTIFIC_NAME, "Pseudopleuronectes americanus") |
+                      str_detect(SCIENTIFIC_NAME, "Clupea harengus") |
+                      str_detect(SCIENTIFIC_NAME, "Melanogrammus aeglefinus")) %>%
+  ggplot(., aes(x=LENGTH)) +
+  geom_histogram() +
+  facet_wrap(~SCIENTIFIC_NAME) +
+  theme_bw()
+```
+
+
+
+
+
 ## Load sample ID files
 
 ```{r}
