@@ -26,6 +26,8 @@ No packages to install in conda environment, bismark and bowtie are loaded as mo
 
 The Haddock genome needs to be bisulfite converted and will live in this directory - `/work/gmgi/Fisheries/reference_genomes/Haddock`. `bismark_genome_preparation` expects a .fasta (Haddock_OLKM01.fasta) file to be within that folder. So path is to a folder not file. The following parameters and script took 7 minutes. 
 
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/900/291/075/GCA_900291075.1_MAEA_1/
+
 `05-genomeprep.sh` (path = /work/gmgi/Fisheries/epiage/haddock/scripts)
 
 ```
