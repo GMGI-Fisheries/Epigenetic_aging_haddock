@@ -1,0 +1,68 @@
+---
+title: "Finding genomic location of significant loci"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+*Done on local computer* 
+
+## Load libraries
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(strex) ## for data transformation 
+```
+
+## Read data 
+
+```{r}
+scaffold_loci <- read.csv("data/05_age_prediction/scaffold_loci_length_df100_AL.csv")
+```
+
+## Plot data from 21-Genomic_location_A
+
+```{r}
+scaffold_loci %>%
+  ggplot(aes(x = as.numeric(factor(scaffold)), y = number_of_loci)) + 
+  geom_hline(yintercept = 20, color = 'grey75') +
+  geom_point(aes(size = number_of_loci > 20, fill = number_of_loci > 20), 
+             shape = 21, color = 'grey30') + 
+  scale_size_manual(values = c("TRUE" = 1.5, "FALSE" = 1.25)) +
+  scale_fill_manual(values = c("TRUE" = "#e76f51", "FALSE" = "grey70")) +
+  theme_classic() +
+  labs(
+    y = "Number of loci",
+    x = "Scaffold"
+  ) +
+    theme(
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=11, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=11, face="bold"),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none"  # This removes the legend
+  ) +
+  annotate(geom = "label", x = 5, y = max(scaffold_loci$number_of_loci), 
+           label = paste0("Scaffolds n=", nrow(scaffold_loci)), hjust = 0, vjust = 1, 
+           label.size = NA, color = "grey30", size = 3.5, fill = NA) +
+    annotate(geom = "label", x = 5, y = (max(scaffold_loci$number_of_loci)*0.95), 
+           label = paste0("Scaffolds with >20 Loci n=", nrow(scaffold_loci %>% filter(number_of_loci > 20))), 
+           hjust = 0, vjust = 1, label.size = NA, color = "grey30", size = 3.5, fill = NA)
+
+ggsave("data/05_age_prediction/figures/scaffold.png", width=7, height=4)
+```
+
+
+
+
+
+

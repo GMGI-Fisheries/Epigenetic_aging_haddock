@@ -1,0 +1,631 @@
+---
+title: "Elastic Net Regression Modeling"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load libraries 
+
+Change the results, error, warning, and message parameters the first time loading this packages to double check for any error or warning messages regarding package loading 
+
+```{r, results='hide', error=FALSE, warning=FALSE, message=FALSE}
+library(readxl) ## read excel file 
+library(writexl) ## write excel file 
+library(plyr) ## needs to be loaded before dplyr 
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(Rmisc)  # for summarySE()
+library(readr)  # for read_csv()
+library(tidyr)  # for unnest()
+library(purrr)  # for map(), reduce()
+library(janitor) # for clean_names()
+library(ggplot2) # for plotting
+library(glmnet)
+library(data.table)
+library(lme4) # for lmer()
+library(car)
+library(ggpubr)
+library(tidymodels)
+library(caret)
+```
+
+# 1. Filter pre GLM
+
+## Data loading
+
+This has been filtered to those positions significant to age.
+
+```{r}
+load(file = "data/WGBS/df_all_20231220.RData")
+##  10,819,892 x 12
+## after loading, double check that this matches the original dimensions of the df
+head(df)
+
+meta <- df %>% dplyr::select(sample, AgeRounded, `Ind Sex`, `Length Cm`) %>% distinct()
+df_spread <- df %>% dplyr::select(sample, AgeRounded, Loc, percent.meth) %>% spread(Loc, percent.meth)
+
+## 74,557 sites with no variation
+nzv.cpg.list <- nearZeroVar(df_spread, freqCut = 85/15, uniqueCut = 50, allowParallel = TRUE) 
+df_spread_filteredDescr <- df_spread[, -nzv.cpg.list]
+
+filteredDescr_matrix <- df_spread_filteredDescr %>% dplyr::select(-sample, -AgeRounded) 
+
+highlyCorDescr <- findCorrelation(filteredDescr_matrix, cutoff = 0.8) ## 464950 sites are highly correlated
+df_spread_filteredDescr_cor <- df_spread_filteredDescr[,-highlyCorDescr]
+## 33,431 sites left that are aren't correlated with each other
+
+df_spread_filteredDescr_cor_list <- df_spread_filteredDescr_cor %>% gather("Loc", "percent.meth", 1:28522) %>%
+  dplyr::select(Loc) %>% distinct()
+
+## df pre filter 10,819,892 rows
+## 541,918 rows
+df2 <- df_spread_filteredDescr_cor_list %>% left_join(., df, by = "Loc")
+```
+
+### setting testing and training samples 
+
+```{r}
+set.seed(123)
+splits <- initial_split(meta, strata = AgeRounded)
+age_training <- training(splits) ## 14 samples
+age_test <- testing(splits) ## 5 samples
+
+age_training %>%
+count(AgeRounded) %>%
+mutate(prop = n/sum(n))
+
+age_test %>%
+count(AgeRounded) %>%
+mutate(prop = n/sum(n))
+
+# df_training [7,972,552 × 12] before spread
+df_training <- age_training %>% left_join(., df, by = c("sample", "AgeRounded", "Ind Sex", "Length Cm")) %>%
+  dplyr::select(sample, AgeRounded, Loc, percent.meth) %>%
+  spread(Loc, percent.meth)
+  
+# df_testing [2,847,340 × 12]
+df_testing <- age_test %>% left_join(., df, by = c("sample", "AgeRounded", "Ind Sex", "Length Cm")) 
+```
+
+## Data pruning
+
+### Removing sites with minimal change correlated with AgeRounded 
+
+`nearZeroVar` = Identification of near zero variance predictors:  
+- `freqCut` = the cutoff for the ratio of the most common value to the second most common value   
+- `uniqueCut` = the cutoff for the percentage of distinct values out of the number of total samples  
+- `saveMetrics` = a logical. If false, the positions of the zero- or near-zero predictors is returned. If true, a data frame with predictor information is returned.   
+- `allowParallel` = should the parallel processing via the for each package be used for the computations? If TRUE, more memory will be used but execution time should be shorter.
+
+```{r}
+nzv.cpg <- nearZeroVar(df_training, saveMetrics= TRUE, names=TRUE, freqCut = 85/15, uniqueCut = 50,
+                       allowParallel = TRUE)
+
+boxplot(nzv.cpg$percentUnique)
+boxplot(nzv.cpg$freqRatio)
+
+nzv.cpg.list <- nearZeroVar(df_training, freqCut = 85/15, uniqueCut = 50) ## 71,090 sites with no variance to be removed
+
+filteredDescr <- df_training[, -nzv.cpg.list]
+## pre filter = 569,468 sites (# of columns - 2)  
+## post filter = 498,378 sites
+```
+
+### Identifying sites that are highly correlated to each other
+
+This step is fine for just haddock - but how do we broaden this for all fish?
+
+```{r}
+filteredDescr_matrix <- filteredDescr %>% dplyr::select(-sample, -AgeRounded) 
+
+highlyCorDescr <- findCorrelation(filteredDescr_matrix, cutoff = 0.8) ## 464950 sites are highly correlated
+## but how does this choose which ones to filter out? filtered for now but come back to this step. we want a list of all correlated with age to compare species  
+filteredDescr.cor <- filteredDescr[,-highlyCorDescr]
+## 33,431 sites left that are aren't correlated with each other 
+```
+
+# 2. GLM model via RHEL server 
+
+09-GLM.R 
+
+# 3. Elastic Net Regression 
+
+## Load data from GLM output 
+
+```{r}
+load("data/WGBS/df_significant.RData") ##308 sites from 19 samples for 5,852 rows
+head(df_significant)
+
+meta <- df_significant %>% dplyr::select(sample, AgeRounded, `Ind Sex`, `Length Cm`) %>% distinct()
+```
+
+## setting training and testing samples
+
+```{r}
+set.seed(123)
+splits <- initial_split(meta, strata = AgeRounded)
+age_training <- training(splits) ## 14 samples
+age_test <- testing(splits) ## 5 samples
+
+age_training %>%
+count(AgeRounded) %>%
+mutate(prop = n/sum(n))
+
+age_test %>%
+count(AgeRounded) %>%
+mutate(prop = n/sum(n)) 
+```
+
+### filtering df_significant to those lists
+
+```{r}
+age_training_list <- age_training %>% dplyr::select(sample)
+age_test_list <- age_test %>% dplyr::select(sample)
+
+df_significant_train <- left_join(age_training_list, df_significant, by = "sample") ##4312 rows
+df_significant_test <- left_join(age_test_list, df_significant, by = "sample") ##1540 rows 
+```
+
+## Creating matrices for elastic net regression
+
+```{r}
+#### TRAINING MODEL #### 
+## creating matrices from df_significant training
+train_methylation <- df_significant_train %>% dplyr::select(sample, Loc, percent.meth) %>% spread(Loc, percent.meth) %>%
+  column_to_rownames(var="sample")
+train_methylation_matrix <- as.matrix(train_methylation)
+
+age <- df_significant_train %>% dplyr::select(sample, AgeRounded) %>% distinct() %>% dplyr::select(AgeRounded)
+age_vector <- age$AgeRounded
+
+## y = age_vector
+## x = methylation_matrix
+
+#### TESTING MODEL #### 
+## creating matrices from df_significant training
+test_methylation <- df_significant_test %>% dplyr::select(sample, Loc, percent.meth) %>% spread(Loc, percent.meth) %>%
+  column_to_rownames(var="sample")
+test_methylation_matrix <- as.matrix(test_methylation)
+
+#### FULL MODEL #### 
+## creating matrices from df_significant training
+full_methylation <- df_significant %>% dplyr::select(sample, Loc, percent.meth) %>% spread(Loc, percent.meth) %>%
+  column_to_rownames(var="sample")
+full_methylation_matrix <- as.matrix(full_methylation)
+
+age_full <- df_significant %>% dplyr::select(sample, AgeRounded) %>% distinct() %>% dplyr::select(AgeRounded)
+age_vector_full <- age_full$AgeRounded
+```
+
+
+In the below cv.glmnet function, "x" represents a matrix of percent methylation values at each site and in each sample; "y" represents a vector of chronological ages associated with each sample. In order to recreate the results presented in the study, use the below "x's" and "y's" for each respective species.
+
+## Estimating model with Elastic Net Regression 
+
+https://books.google.com/books?hl=en&lr=&id=2YXmEAAAQBAJ&oi=fnd&pg=PT111&dq=info:xmnrAcdob2UJ:scholar.google.com&ots=CrlH3dbMdW&sig=nSdnLKUEhz3rKDhXNR1eVdGWKZs#v=onepage&q&f=false 
+
+https://glmnet.stanford.edu/articles/glmnet.html
+
+https://github.com/marinegenomicslab/Epi-Age-Est/blob/main/Scripts/Elastic%20Net%20Regression.Rmd
+
+alpha parameter of 0.5 (considered the optimal merging of a ridge and lasso model; Thompson et al. 2017; Mayne et al. 2020; Bertucci et al. 2021). 
+
+cv.glmnet uses internal validated lambda values 
+
+### Training and Testing
+
+```{r}
+cvfit <- cv.glmnet(x = train_methylation_matrix, y = age_vector, alpha=0.5, nfolds = 10,
+                   type.measure ="mae", family="gaussian", standardize=F)
+plot(cvfit)
+
+## MAE = mean absolute error
+MAEs_train <- NULL
+for (i in 1:100){
+                 cv_train <- cv.glmnet(x = train_methylation_matrix, y = age_vector, alpha = 0.5, 
+                                 nfolds = 10, type.measure="mae", family="gaussian", standardize=FALSE)  
+                 MAEs_train <- cbind(MAEs_train, cv_train$cvm)
+}
+
+  MAEs_train <- data.frame(MAEs_train)
+  rownames(MAEs_train) <- cv_train$lambda
+  MAEs_train <- setDT(MAEs_train, keep.rownames = "lambda")[]
+  MAEs_train$mean.mae <- rowMeans(MAEs_train[ ,c(2:101)])
+  lambda.min.train <- min(MAEs_train$lambda)
+  min.mae.train <- min(MAEs_train$mean.mae)
+
+plot(cv_train)
+
+#Get no. of CpG sites selected by the elastic net model
+coefList_train <- coef(cv_train, s=cv_train$lambda.min)
+coefList_train <- data.frame(coefList_train@Dimnames[[1]][coefList_train@i+1],coefList_train@x)
+names(coefList_train) <- c('var','val')
+coefList_train <- coefList_train[-1, ]
+nrow(coefList_train)
+
+#Make age predictions using final model
+## PREDICT TRAINING SET
+y_hat_enet_train <- as.data.frame(predict(cv_train, newx=train_methylation_matrix, s="lambda.min"))
+
+## PREDICT TESTING SET
+y_hat_enet_testing <- as.data.frame(predict(cv_train, newx=test_methylation_matrix, s="lambda.min"))
+```
+
+### full set 
+
+```{r}
+cvfit_full <- cv.glmnet(x = full_methylation_matrix, y = age_vector_full, alpha=0.5, nfolds = 10,
+                   type.measure ="mae", family="gaussian", standardize=F)
+plot(cvfit_full)
+
+## MAE = mean absolute error
+MAEs <- NULL
+for (i in 1:100){
+                 cv <- cv.glmnet(x = full_methylation_matrix, y = age_vector_full, alpha = 0.5, 
+                                 nfolds = 10, type.measure="mae", family="gaussian", standardize=FALSE)  
+                 MAEs <- cbind(MAEs, cv$cvm)
+}
+
+  MAEs <- data.frame(MAEs)
+  rownames(MAEs) <- cv$lambda
+  MAEs <- setDT(MAEs, keep.rownames = "lambda")[]
+  MAEs$mean.mae <- rowMeans(MAEs[ ,c(2:101)])
+  lambda.min <- min(MAEs$lambda)
+  min.mae <- min(MAEs$mean.mae)
+
+plot(cv)
+
+#Get no. of CpG sites selected by the elastic net model
+coefList <- coef(cv, s=cv$lambda.min)
+coefList <- data.frame(coefList@Dimnames[[1]][coefList@i+1],coefList@x)
+names(coefList) <- c('var','val')
+coefList <- coefList[-1, ]
+nrow(coefList)
+
+#Make age predictions using final model
+y_hat_enet_full <- as.data.frame(predict(cv, newx=full_methylation_matrix, s="lambda.min"))
+```
+
+## Data transformation
+
+```{r}
+## train and testing
+predicted_age <- y_hat_enet_train %>% rownames_to_column(var="sample") %>% dplyr::rename(epi.age = lambda.min)
+predicted_age_testing <- y_hat_enet_testing %>% rownames_to_column(var="sample") %>% dplyr::rename(epi.age = lambda.min)
+
+predicted_age$group <- "training"
+predicted_age_testing$group <- "testing"
+
+predictions <- full_join(predicted_age, predicted_age_testing)
+
+## full 
+predicted_age_full <- y_hat_enet_full %>% rownames_to_column(var="sample") %>% dplyr::rename(epi.age = lambda.min)
+
+## import metadata
+metadata <- read_xlsx("data/metadata/full_finclips_sampling.xlsx") %>% 
+  dplyr::select(GMGI_ID, `Length Cm`, `Ind Sex`, AgeRounded, sampling_season) %>%
+  dplyr::rename(sample = GMGI_ID)
+
+predict_age <- right_join(metadata, predictions, by = "sample")
+predict_age_full <- right_join(metadata, predicted_age_full, by = "sample")
+```
+
+
+## Plotting otolith age vs. Epigenetic predicted age 
+
+```{r}
+epiage_plot <- ggplot(predict_age, aes(x=AgeRounded, y=epi.age)) + theme_classic() + 
+  geom_smooth(method='lm', se=FALSE, color= "grey", alpha=0.8) +
+  geom_point(aes(fill=group), size=5, alpha=1, color="black", shape=21) +  
+  #scale_fill_manual(values = c("gold3", "purple3")) +
+  scale_fill_manual(values = c("green4", "lightblue3")) +
+  #geom_point(size=5, alpha=1, color="black", shape=21) + 
+  xlim(0,12) + ylim(0,12) +
+  labs("Set") +
+  ylab("Epigenetic Age") + xlab("Otolith Age") +
+  theme(#strip.background = element_blank(),
+        #axis.text.x=element_blank(),
+        #panel.background = element_rect(margin(1, 1, 1, 1, "cm")),
+        #plot.margin = margin(1, 1, 1, 1, "cm"),
+        strip.placement='outside',
+        legend.position="right",
+        legend.title = element_text(face="bold", size=12),
+        legend.text = element_text(size=10),
+        strip.text = element_text(face = "bold", size=14),
+        axis.title.y = element_text(margin = margin(t = 0, r = 15, b = 0, l = 0), size=20, face="bold"),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=20, face="bold"),
+        axis.text.x = element_text(color="black", size=14),
+        axis.text.y = element_text(color="black", size=14)) +
+  stat_regline_equation(label.x=0.2, label.y = 11, size=8, aes(label = ..rr.label..))
+
+ggsave(epiage_plot, file="data/output/epiage-prediction-regression-traintest.png", width=8, height=7, units=c("in"))
+```
+
+## Heatmap with patterns 
+
+https://r-charts.com/correlation/pheatmap/  
+https://colorspace.r-forge.r-project.org/articles/hcl_palettes.html
+
+```{r}
+### age order list 
+age_order <- df_significant %>% dplyr::select(sample, AgeRounded) %>% distinct() %>% arrange(AgeRounded)
+age_order <- age_order$sample
+
+## full list of genes 
+full_methylation_t <- as.data.frame(t(full_methylation))
+full_methylation_t <- full_methylation_t[ , age_order]
+
+heatmap_key <- df_significant %>% dplyr::select(sample, AgeRounded) %>% distinct() %>% 
+  column_to_rownames(var="sample")  
+                                                
+library("pheatmap")
+library(RColorBrewer)
+
+heatmap_positions_all <- pheatmap(full_methylation_t, 
+         color = rev(hcl.colors(30, "Mint")),
+         show_rownames=F,
+         annotation_col = heatmap_key_coef,
+         #annotation_colors = colors,
+         cluster_cols = FALSE,
+         cutree_rows = 3
+         #border_color = "black",
+         )
+
+## top genes used in model 
+coefList_positions <- coefList %>% dplyr::select(var) %>% dplyr::rename(Loc=var)
+df_significant_coef <- left_join(coefList_positions, df_significant, by = "Loc") %>% 
+  dplyr::select(sample, Loc, percent.meth) %>%
+  spread(Loc, percent.meth) %>%
+  column_to_rownames(var="sample")
+
+df_significant_coef_t <- as.data.frame(t(df_significant_coef))
+df_significant_coef_t <- df_significant_coef_t[ , age_order]
+
+heatmap_key_coef <- left_join(coefList_positions, df_significant, by = "Loc") %>% 
+  dplyr::select(sample, AgeRounded) %>% distinct() %>% 
+  column_to_rownames(var="sample") %>% arrange(AgeRounded)
+
+heatmap_positions <- pheatmap(df_significant_coef_t, 
+         color = rev(hcl.colors(30, "Mint")),
+         show_rownames=F,
+         annotation_col = heatmap_key_coef,
+         #annotation_colors = ann_colors,
+         cluster_cols = FALSE,
+         border_color = "black",
+         )
+```
+```{r}
+pdf(file = "data/output/heatmap_ENpositions.pdf", width=8, height=5)
+heatmap_positions
+dev.off()
+
+pdf(file = "data/output/heatmap_allpositions.pdf", width=8, height=5)
+heatmap_positions_all
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+
+
+# OLD ELASTIC CODE 
+
+---- come back to this -----
+
+
+## Center and scaling data 
+
+```{r}
+preProcValues <- preProcess(filteredDescr.cor, method = c("center", "scale"))
+trainTransformed <- predict(preProcValues, filteredDescr)
+```
+
+## Conducting elastic net regression modeling
+
+```{r}
+## Define resampling technique to be used. Here we choose repeated cross-validation
+fitControl <- trainControl(method = 'repeatedcv', number=10, repeats=10)
+
+##Define range of lambda to be tested
+lambda <- 10^seq(-3, 3, length = 100)
+
+set.seed(123)
+
+## Elastic Net Regression model 
+## too big input
+elastic_model <- train(AgeRounded ~., data = trainTransformed, method = "glmnet", trControl = fitControl, tuneLength = 10)
+
+## saving model output
+save(elastic_model, file = "data/WGBS/output/elasticnet_model.Rdata")
+
+predicted.age <- predict.train(elastic_model)
+postResample(pred = predicted.age, trainTransformed$AgeRounded)
+cor.test(predicted.age, trainTransformed$AgeRounded)
+```
+
+Left off on this is too big so use 30k input for GLM before elastic net
+
+
+## Using this on the test set
+
+```{r}
+preProcValues_test <- preProcess(df_testing, method = c("center", "scale"))
+testTransformed <- predict(preProcValues_test, filteredDescr)
+
+## Test set 
+predict.enet.test <- predict(elastic_model, testTransformed)
+postResample(pred = predict.enet.test, testTransformed$age)
+cor.test(predict.enet.test, testTransformed$age)
+```
+
+
+
+
+# Estimating model with Elastic Net Regression 
+
+https://books.google.com/books?hl=en&lr=&id=2YXmEAAAQBAJ&oi=fnd&pg=PT111&dq=info:xmnrAcdob2UJ:scholar.google.com&ots=CrlH3dbMdW&sig=nSdnLKUEhz3rKDhXNR1eVdGWKZs#v=onepage&q&f=false 
+
+https://glmnet.stanford.edu/articles/glmnet.html
+
+https://github.com/marinegenomicslab/Epi-Age-Est/blob/main/Scripts/Elastic%20Net%20Regression.Rmd
+
+alpha parameter of 0.5 (considered the optimal merging of a ridge and lasso model; Thompson et al. 2017; Mayne et al. 2020; Bertucci et al. 2021). 
+
+cv.glmnet uses internal validated lambda values 
+
+#### Training and Testing
+
+```{r}
+cvfit <- cv.glmnet(x = methylation_matrix, y = age_vector, alpha=0.5, nfolds = 10,
+                   type.measure ="mae", family="gaussian", standardize=F)
+plot(cvfit)
+
+## MAE = mean absolute error
+MAEs <- NULL
+for (i in 1:100){
+                 cv <- cv.glmnet(x = methylation_matrix, y = age_vector, alpha = 0.5, 
+                                 nfolds = 10, type.measure="mae", family="gaussian", standardize=FALSE)  
+                 MAEs <- cbind(MAEs, cv$cvm)
+}
+
+  MAEs <- data.frame(MAEs)
+  rownames(MAEs) <- cv$lambda
+  MAEs <- setDT(MAEs, keep.rownames = "lambda")[]
+  MAEs$mean.mae <- rowMeans(MAEs[ ,c(2:101)])
+  lambda.min <- min(MAEs$lambda)
+  min.mae <- min(MAEs$mean.mae)
+
+plot(cv)
+
+#Get no. of CpG sites selected by the elastic net model
+coefList <- coef(cv, s=cv$lambda.min)
+coefList <- data.frame(coefList@Dimnames[[1]][coefList@i+1],coefList@x)
+names(coefList) <- c('var','val')
+coefList <- coefList[-1, ]
+nrow(coefList)
+
+#Make age predictions using final model
+## PREDICT TRAINING SET
+y_hat_enet <- as.data.frame(predict(cv, newx=methylation_matrix, s="lambda.min"))
+
+## PREDICT TESTING SET
+y_hat_enet_testing <- as.data.frame(predict(cv, newx=methylation_matrix_test, s="lambda.min"))
+```
+
+#### full set
+
+```{r}
+cvfit_full <- cv.glmnet(x = methylation_matrix_full, y = age_vector_full, alpha=0.5, nfolds = 10,
+                   type.measure ="mae", family="gaussian", standardize=F)
+plot(cvfit_full)
+
+## MAE = mean absolute error
+MAEs <- NULL
+for (i in 1:100){
+                 cv <- cv.glmnet(x = methylation_matrix_full, y = age_vector_full, alpha = 0.5, 
+                                 nfolds = 10, type.measure="mae", family="gaussian", standardize=FALSE)  
+                 MAEs <- cbind(MAEs, cv$cvm)
+}
+
+  MAEs <- data.frame(MAEs)
+  rownames(MAEs) <- cv$lambda
+  MAEs <- setDT(MAEs, keep.rownames = "lambda")[]
+  MAEs$mean.mae <- rowMeans(MAEs[ ,c(2:101)])
+  lambda.min <- min(MAEs$lambda)
+  min.mae <- min(MAEs$mean.mae)
+
+plot(cv)
+
+#Get no. of CpG sites selected by the elastic net model
+coefList <- coef(cv, s=cv$lambda.min)
+coefList <- data.frame(coefList@Dimnames[[1]][coefList@i+1],coefList@x)
+names(coefList) <- c('var','val')
+coefList <- coefList[-1, ]
+nrow(coefList)
+
+#Make age predictions using final model
+y_hat_enet_full <- as.data.frame(predict(cv, newx=methylation_matrix_full, s="lambda.min"))
+```
+
+
+
+
+
+# Plotting otolith age vs. Epigenetic predicted age 
+
+Data transformation
+
+```{r}
+predicted_age <- y_hat_enet %>% rownames_to_column(var="sample") %>% dplyr::rename(epi.age = lambda.min)
+predicted_age_testing <- y_hat_enet_testing %>% rownames_to_column(var="sample") %>% dplyr::rename(epi.age = lambda.min)
+
+predicted_age$group <- "training"
+predicted_age_testing$group <- "testing"
+
+predictions <- full_join(predicted_age, predicted_age_testing)
+
+## import metadata
+metadata <- read_xlsx("data/metadata/full_finclips_sampling.xlsx") %>% 
+  dplyr::select(GMGI_ID, `Length Cm`, `Ind Sex`, AgeRounded, sampling_season) %>%
+  dplyr::rename(sample = GMGI_ID)
+
+predict_age <- right_join(metadata, predictions, by = "sample")
+```
+
+
+Plotting
+
+```{r}
+ggplot(predict_age, aes(x=AgeRounded, y=epi.age)) + theme_classic() + 
+  geom_smooth(method='lm', se=FALSE, color= "black", alpha=0.8) +
+  geom_point(aes(fill=group), size=3, alpha=0.3, color="black", shape=21) + #aes(fill=group)
+  xlim(0,12) + ylim(0,12) +
+  ylab("Epigenetic Age") + xlab("Otolith Age") +
+  theme(#strip.background = element_blank(),
+        #axis.text.x=element_blank(),
+        #panel.background = element_rect(margin(1, 1, 1, 1, "cm")),
+        #plot.margin = margin(1, 1, 1, 1, "cm"),
+        strip.placement='outside',
+        legend.position="right",
+        strip.text = element_text(face = "bold", size=10),
+        axis.title.y = element_text(margin = margin(t = 0, r = 15, b = 0, l = 0), size=12, face="bold"),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=12, face="bold"),
+        axis.text.x = element_text(color="black")) +
+  stat_regline_equation(label.x=0.2, label.y = 11, aes(label = ..rr.label..))
+```
+
+
+## Statistics
+
+```{r}
+predict_age$`Length Cm` <- as.factor(predict_age$`Length Cm`)
+
+age_lmer <- lmer(epi.age ~ AgeRounded + (1|`Ind Sex`), na.action=na.omit, data=predict_age)
+
+qqPlot(residuals(age_lmer)) 
+hist(residuals(age_lmer)) 
+
+age_anova <- Anova(age_lmer, ddf="lme4", type='III') 
+summary(age_anova)
+```
+

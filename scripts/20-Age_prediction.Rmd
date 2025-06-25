@@ -1,0 +1,804 @@
+---
+title: "Elastic Net Regression Modeling"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Load libraries 
+
+Change the results, error, warning, and message parameters the first time loading this packages to double check for any error or warning messages regarding package loading 
+
+```{r, results='hide', error=FALSE, warning=FALSE, message=FALSE}
+# Load necessary libraries
+library(readxl)   # read Excel files
+library(writexl)  # write Excel files
+library(plyr)     # needs to be loaded before dplyr
+library(dplyr)    # data manipulation
+library(tidyverse) # includes dplyr, tidyr, readr, purrr, and more
+library(ggplot2)  # plotting (included in tidyverse but listed explicitly for clarity)
+library(Rmisc)    # for summarySE()
+library(janitor)  # for clean_names()
+library(glmnet)   # for generalized linear models
+library(data.table) # for efficient data manipulation
+library(lme4)     # for linear mixed effects models
+library(car)      # for regression diagnostics
+library(ggpubr)   # for ggplot2 extensions
+library(tidymodels) # for modeling and machine learning
+library(caret)    # for machine learning and regression
+library(psych)    # for psychological statistics
+library(bestNormalize) # for data normalization
+library(emmeans)  # for estimated marginal means
+library(rstanarm) # for Bayesian models
+library(coda)     # for Markov chain Monte Carlo diagnostics
+library(parallel) # for parallel processing
+library(glmnetUtils)
+
+# Note: tidyverse includes tidyr, readr, purrr, and other packages.
+#       Loading tidyverse reduces the need to load these individually.
+```
+
+# Load data 
+
+```{r}
+## adding metadata 
+meta <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.xlsx", 
+                  sheet = "Sample List") %>% 
+  dplyr::select(GMGI_ID, Length, Sex, AgeRounded, Season) %>%
+  filter(!GMGI_ID %in% under96BC$GMGI_ID)
+  #  ## testing removing outliers 
+  # filter(!GMGI_ID=="Mae-285") %>%
+  # filter(!GMGI_ID=="Mae-424") %>%
+  # filter(!GMGI_ID=="Mae-422") %>%
+  # filter(!GMGI_ID=="Mae-500") %>%
+  # filter(!GMGI_ID=="Mae-299")
+
+under96BC <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/conversion_eff/under96.xlsx")
+```
+
+
+```{r}
+## 100% df5 age and age + length
+# load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered5/df100_f5_age_final.RData")
+# load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered5/df100_f5_agelength_final.RData")
+
+## 90% df5 age and age + length
+#load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered5/df_f5_agelength_final.RData")
+#load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered5/df_f5_age_final.RData")
+
+## 100% df4 age and age + length
+load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_final.RData")
+load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final.RData")
+
+## 90% df4 age and age + length from 19-Missing values script 
+load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
+df_f4_agelength_imputed <- results1 %>% rownames_to_column(var = "Loc") %>%
+  gather("GMGI_ID", "percent.meth", 2:last_col()) %>%
+  left_join(., meta, by = "GMGI_ID")
+
+sig_values <- 
+  # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_AL_sig.csv") %>% 
+  # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_sig.csv") %>%
+  # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_sig.csv") %>%
+  read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig.csv") %>%
+  dplyr::select(-X) %>%
+  arrange(p.value) %>%
+  slice_head(prop = 0.20) %>%
+  
+  ### below only needed for imputed values 
+  mutate(Loc = gsub(" ", "_", Loc),
+         Loc = gsub("\\|", "_", Loc))
+
+## Filter to top PC loadings 
+PC2_loadings <- read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/PC2_loadings_df100_AL.csv")
+```
+
+# Chosing which df to use
+
+```{r}
+# df <- #df100_f4_agelength_final  %>%
+#   df100_f4_age_final %>%
+#   dplyr::select(-`Length Cm`, -`Ind Sex`, -sampling_season, -AgeRounded) %>%
+#   dplyr::rename(GMGI_ID = sample) %>%
+#   filter(!GMGI_ID=="Mae-285") %>%
+#   filter(!GMGI_ID=="Mae-424") %>%
+#   filter(!GMGI_ID=="Mae-422") %>%
+#   filter(!GMGI_ID=="Mae-500") %>%
+#   filter(!GMGI_ID=="Mae-299")
+
+df <- df_f4_agelength_imputed %>%
+  dplyr::select(-Length, -Sex, -Season)  %>%
+  filter(!GMGI_ID %in% under96BC$GMGI_ID)
+  # filter(!GMGI_ID=="Mae-285") %>%
+  # filter(!GMGI_ID=="Mae-424") %>%
+  # filter(!GMGI_ID=="Mae-422") %>%
+  # filter(!GMGI_ID=="Mae-500") %>%
+  # filter(!GMGI_ID=="Mae-299")
+
+## number of loci working with 
+length(unique(df$Loc)) 
+## 7,731 loci for 100% df4 age + length ## 20,323 for 100% df4 age only (so length can affect)
+## 47,373 loci for 90% df4 age + length ## 
+
+hist(df$percent.meth) ## identify skew for potential normalizing needs  
+
+## FILTER TO MOST SIGNIFICANT SITES
+## filter for top % most significant sites
+df <- df %>% filter(Loc %in% sig_values$Loc)
+## number of loci working with 
+length(unique(df$Loc)) 
+
+## REMOVE OR SUBSET TO HIGHLY CORRELATED SITES
+df_wide <- df %>% spread(Loc, percent.meth)
+x_matrix <- as.matrix(df_wide[,-(1:2)])
+
+corr_matrix <- corr.test(x = as.matrix(x_matrix), y = df_wide[, 2], 
+                         use="pairwise", method="pearson", adjust="BH", alpha=0.05)
+corr_results <- data.frame(corr_matrix$r, corr_matrix$p.adj)
+corr_results <- tibble::rownames_to_column(corr_results, "Loc")
+colnames(corr_results) <- c("Loc", "r", "padj")
+corr_results$absr <- abs(corr_results$r) ## r = correlation coefficients
+quant <- quantile(corr_results$absr, 0.75, na.rm = TRUE)
+loc_highr <- corr_results %>%
+  filter(absr > quant)
+
+# df <- df %>% filter(Loc %in% loc_highr$Loc)
+
+### FILTER TO PC2 LOADINGS FROM PCA
+# df <- df %>% filter(Loc %in% PC2_loadings$Loc)
+
+length(unique(df$Loc))
+
+###### Normalize DNA percent methylation
+methylation_values <- df$percent.meth
+BN_obj <- bestNormalize(methylation_values)
+## view output and use that to predict new values
+BN_obj
+transformed_data <- as.data.frame(predict(BN_obj)) %>% dplyr::rename(normalized_meth=1)
+df$normalized_meth <- transformed_data$normalized_meth
+```
+
+# Training and testing sets 
+
+```{r}
+# Create a split with prop=
+splits <- initial_split(meta, strata = AgeRounded, prop = 0.75)
+age_training <- training(splits)
+age_test <- testing(splits)
+
+# Print the number of samples in each set
+cat("Training samples:", nrow(age_training), "\n")
+cat("Test samples:", nrow(age_test), "\n")
+
+## confirming even proportions of age rounded bins 
+age_training %>% count(AgeRounded) %>% mutate(prop = n/sum(n))
+age_test %>% count(AgeRounded) %>% mutate(prop = n/sum(n))
+
+age_training_list <- age_training %>% dplyr::select(GMGI_ID)
+age_test_list <- age_test %>% dplyr::select(GMGI_ID)
+
+### CHANGE BELOW DF NAMES AS NEEDED
+df_significant_train <- left_join(age_training_list, df, by = "GMGI_ID") #%>% left_join(., meta, by = "GMGI_ID")
+df_significant_test <- left_join(age_test_list, df, by = "GMGI_ID") #%>% left_join(., meta, by = "GMGI_ID")
+df_full <- df #%>% left_join(., meta, by = "GMGI_ID")
+```
+
+## Running a loop for choosing
+
+## Pearson correlation 
+
+Only done for large datasets 5,000 sites +
+
+```{r}
+# df_matrix <- df %>% left_join(meta, ., by = "GMGI_ID") %>%
+#   dplyr::select(GMGI_ID, Loc, percent.meth, AgeRounded) %>% spread(Loc, percent.meth) %>%
+#   column_to_rownames(var = "GMGI_ID")
+# 
+# corr_matrix <- corr.test(x = as.matrix(df_matrix[,-1]), y = df_matrix[,1], 
+#                          use="pairwise", method="pearson", adjust="BH", alpha=0.05)
+# 
+# corr_results <- data.frame(corr_matrix$r, corr_matrix$p.adj) %>% 
+#   rownames_to_column(var = "Loc")
+# colnames(corr_results) <- c("Loc", "r", "padj")
+# corr_results$absr <- abs(corr_results$r)
+# 
+# ## Takes top 10% of loci 
+# cutoff_value <- quantile(corr_results$absr, 0.95)
+# 
+# loc_highr <- corr_results %>% filter(absr > cutoff_value) %>% reframe(Loc)
+# ## 1,049 loci for top 10% and 525 for top 5%
+# 
+# df_significant_train <- df_significant_train %>% filter(!Loc %in% loc_highr$Loc)
+# df_significant_test <- df_significant_test %>% filter(!Loc %in% loc_highr$Loc)
+# df_significant_full <- df_full %>% filter(!Loc %in% loc_highr$Loc)
+```
+
+# Elastic Net Regression 
+
+### Creating df for regression model 
+
+```{r}
+column_to_use <- "percent.meth"
+#column_to_use <- "normalized_meth"
+
+### creating matrices 
+training_matrix <- df_significant_train %>% dplyr::select(GMGI_ID, Loc, column_to_use) %>% 
+  spread(Loc, column_to_use) %>% arrange(GMGI_ID) %>%
+  column_to_rownames(var="GMGI_ID")
+training_matrix <- as.matrix(training_matrix)
+
+testing_matrix <- df_significant_test %>% dplyr::select(GMGI_ID, Loc, column_to_use) %>% 
+  spread(Loc, column_to_use) %>%  arrange(GMGI_ID) %>%
+  column_to_rownames(var="GMGI_ID")
+testing_matrix <- as.matrix(testing_matrix)
+
+full_matrix <- df_full %>% dplyr::select(GMGI_ID, Loc, column_to_use) %>% 
+  spread(Loc, column_to_use) %>%  arrange(GMGI_ID) %>%
+  column_to_rownames(var="GMGI_ID")
+full_matrix <- as.matrix(full_matrix)
+
+## age vectors 
+age_training <- df_significant_train %>% dplyr::select(GMGI_ID, AgeRounded) %>% 
+  distinct() %>% arrange(GMGI_ID) %>% dplyr::select(AgeRounded)
+age_training_vector <- age_training$AgeRounded
+
+age_full <- df_full %>% dplyr::select(GMGI_ID, AgeRounded) %>% 
+  distinct() %>% arrange(GMGI_ID) %>% dplyr::select(AgeRounded)
+age_full_vector <- age_full$AgeRounded
+```
+
+## Trying alpha = 0 first then cva.glmnet
+
+```{r}
+### Round 1
+CVGLM <- cv.glmnet(x = training_matrix,
+                   y = age_training_vector,
+                   nfolds = nrow(training_matrix),
+                   alpha = 0,
+                   type.measure = "mae",
+                   family = "gaussian",
+                   grouped=FALSE)
+
+min(CVGLM$cvm)
+
+#Get CpG site model coefficients
+coefList <- coef(CVGLM, s=CVGLM$lambda.min)
+coefList <- data.frame(coefList@Dimnames[[1]][coefList@i+1],coefList@x)
+names(coefList) <- c('var','val')
+coefList <- coefList[-1, ]
+colnames(coefList) <- c("Loc", "Weight")
+coefList$AbsWeight <- abs(coefList$Weight)
+
+loc_highweights <- coefList %>%
+  filter(AbsWeight > quantile(coefList$AbsWeight, 0.3))
+
+filtered_training_matrix <- training_matrix[, loc_highweights$Loc]
+filtered_testing_matrix <- testing_matrix[, loc_highweights$Loc]
+
+### Round 2 
+CVGLM <- cv.glmnet(x = filtered_training_matrix,
+                   y = age_training_vector,
+                   nfolds = nrow(filtered_training_matrix),
+                   alpha = 0,
+                   type.measure = "mae",
+                   family = "gaussian",
+                   grouped=FALSE)
+
+min(CVGLM$cvm)
+
+#Get CpG site model coefficients
+coefList <- coef(CVGLM, s=CVGLM$lambda.min)
+coefList <- data.frame(coefList@Dimnames[[1]][coefList@i+1],coefList@x)
+names(coefList) <- c('var','val')
+coefList <- coefList[-1, ]
+colnames(coefList) <- c("Loc", "Weight")
+coefList$AbsWeight <- abs(coefList$Weight)
+
+loc_highweights <- coefList %>%
+  filter(AbsWeight > quantile(coefList$AbsWeight, 0.3))
+
+filtered_training_matrix <- filtered_training_matrix[, loc_highweights$Loc]
+filtered_testing_matrix <- filtered_testing_matrix[, loc_highweights$Loc]
+
+### Round 3
+CVGLM <- cv.glmnet(x = filtered_training_matrix,
+                   y = age_training_vector,
+                   nfolds = nrow(filtered_training_matrix),
+                   alpha = 0,
+                   type.measure = "mae",
+                   family = "gaussian",
+                   grouped=FALSE)
+
+min(CVGLM$cvm)
+
+#Get CpG site model coefficients
+coefList <- coef(CVGLM, s=CVGLM$lambda.min)
+coefList <- data.frame(coefList@Dimnames[[1]][coefList@i+1],coefList@x)
+names(coefList) <- c('var','val')
+coefList <- coefList[-1, ]
+colnames(coefList) <- c("Loc", "Weight")
+coefList$AbsWeight <- abs(coefList$Weight)
+
+loc_highweights <- coefList %>%
+  filter(AbsWeight > quantile(coefList$AbsWeight, 0.3))
+
+filtered_training_matrix <- filtered_training_matrix[, loc_highweights$Loc]
+filtered_testing_matrix <- filtered_testing_matrix[, loc_highweights$Loc]
+
+### Round 4 
+CVGLM <- cv.glmnet(x = filtered_training_matrix,
+                   y = age_training_vector,
+                   nfolds = nrow(filtered_training_matrix),
+                   alpha = 0,
+                   type.measure = "mae",
+                   family = "gaussian",
+                   grouped=FALSE)
+
+min(CVGLM$cvm)
+
+#Get CpG site model coefficients
+coefList <- coef(CVGLM, s=CVGLM$lambda.min)
+coefList <- data.frame(coefList@Dimnames[[1]][coefList@i+1],coefList@x)
+names(coefList) <- c('var','val')
+coefList <- coefList[-1, ]
+colnames(coefList) <- c("Loc", "Weight")
+coefList$AbsWeight <- abs(coefList$Weight)
+
+loc_highweights <- coefList %>%
+  filter(AbsWeight > quantile(coefList$AbsWeight, 0.3))
+
+filtered_training_matrix <- filtered_training_matrix[, loc_highweights$Loc]
+filtered_testing_matrix <- filtered_testing_matrix[, loc_highweights$Loc]
+
+## Round 5
+CVGLM <- cv.glmnet(x = filtered_training_matrix,
+                   y = age_training_vector,
+                   nfolds = nrow(filtered_training_matrix),
+                   alpha = 0,
+                   type.measure = "mae",
+                   family = "gaussian",
+                   grouped=FALSE)
+
+min(CVGLM$cvm)
+
+#Get CpG site model coefficients
+coefList <- coef(CVGLM, s=CVGLM$lambda.min)
+coefList <- data.frame(coefList@Dimnames[[1]][coefList@i+1],coefList@x)
+names(coefList) <- c('var','val')
+coefList <- coefList[-1, ]
+colnames(coefList) <- c("Loc", "Weight")
+coefList$AbsWeight <- abs(coefList$Weight)
+
+loc_highweights <- coefList %>%
+  filter(AbsWeight > quantile(coefList$AbsWeight, 0.3))
+
+filtered_training_matrix <- filtered_training_matrix[, loc_highweights$Loc]
+filtered_testing_matrix <- filtered_testing_matrix[, loc_highweights$Loc]
+
+## Round 6
+CVGLM <- cv.glmnet(x = filtered_training_matrix,
+                   y = age_training_vector,
+                   nfolds = nrow(filtered_training_matrix),
+                   alpha = 0,
+                   type.measure = "mae",
+                   family = "gaussian",
+                   grouped=FALSE)
+
+min(CVGLM$cvm)
+
+#Get CpG site model coefficients
+coefList <- coef(CVGLM, s=CVGLM$lambda.min)
+coefList <- data.frame(coefList@Dimnames[[1]][coefList@i+1],coefList@x)
+names(coefList) <- c('var','val')
+coefList <- coefList[-1, ]
+colnames(coefList) <- c("Loc", "Weight")
+coefList$AbsWeight <- abs(coefList$Weight)
+
+loc_highweights <- coefList %>%
+  filter(AbsWeight > quantile(coefList$AbsWeight, 0.2))
+### top 20%: 159 loci
+### top correlated; 90% AL mice imputed: 796 loci
+
+filtered_training_matrix <- filtered_training_matrix[, loc_highweights$Loc]
+filtered_testing_matrix <- filtered_testing_matrix[, loc_highweights$Loc]
+
+## Round 7
+CVGLM <- cv.glmnet(x = filtered_training_matrix,
+                   y = age_training_vector,
+                   nfolds = nrow(filtered_training_matrix),
+                   alpha = 0,
+                   type.measure = "mae",
+                   family = "gaussian",
+                   grouped=FALSE)
+
+min(CVGLM$cvm)
+
+#Get CpG site model coefficients
+coefList <- coef(CVGLM, s=CVGLM$lambda.min)
+coefList <- data.frame(coefList@Dimnames[[1]][coefList@i+1],coefList@x)
+names(coefList) <- c('var','val')
+coefList <- coefList[-1, ]
+colnames(coefList) <- c("Loc", "Weight")
+coefList$AbsWeight <- abs(coefList$Weight)
+
+loc_highweights <- coefList %>%
+  filter(AbsWeight > quantile(coefList$AbsWeight, 0.2))
+### top 20%: 159 loci
+### top correlated; 90% AL mice imputed: 796 loci
+
+filtered_training_matrix <- filtered_training_matrix[, loc_highweights$Loc]
+filtered_testing_matrix <- filtered_testing_matrix[, loc_highweights$Loc]
+ 
+## Round 8
+CVGLM <- cv.glmnet(x = filtered_training_matrix,
+                   y = age_training_vector,
+                   nfolds = nrow(filtered_training_matrix),
+                   alpha = 0,
+                   type.measure = "mae",
+                   family = "gaussian",
+                   grouped=FALSE)
+
+min(CVGLM$cvm)
+
+#Get CpG site model coefficients
+coefList <- coef(CVGLM, s=CVGLM$lambda.min)
+coefList <- data.frame(coefList@Dimnames[[1]][coefList@i+1],coefList@x)
+names(coefList) <- c('var','val')
+coefList <- coefList[-1, ]
+colnames(coefList) <- c("Loc", "Weight")
+coefList$AbsWeight <- abs(coefList$Weight)
+
+loc_highweights <- coefList %>%
+  filter(AbsWeight > quantile(coefList$AbsWeight, 0.2))
+### top 20%: 159 loci
+### top correlated; 90% AL mice imputed: 796 loci
+
+filtered_training_matrix <- filtered_training_matrix[, loc_highweights$Loc]
+filtered_testing_matrix <- filtered_testing_matrix[, loc_highweights$Loc]
+
+## Round 9
+CVGLM <- cv.glmnet(x = filtered_training_matrix,
+                   y = age_training_vector,
+                   nfolds = nrow(filtered_training_matrix),
+                   alpha = 0,
+                   type.measure = "mae",
+                   family = "gaussian",
+                   grouped=FALSE)
+
+min(CVGLM$cvm)
+
+#Get CpG site model coefficients
+coefList <- coef(CVGLM, s=CVGLM$lambda.min)
+coefList <- data.frame(coefList@Dimnames[[1]][coefList@i+1],coefList@x)
+names(coefList) <- c('var','val')
+coefList <- coefList[-1, ]
+colnames(coefList) <- c("Loc", "Weight")
+coefList$AbsWeight <- abs(coefList$Weight)
+
+loc_highweights <- coefList %>%
+  filter(AbsWeight > quantile(coefList$AbsWeight, 0.2))
+### top 20%: 159 loci
+### top correlated; 90% AL mice imputed: 796 loci
+
+filtered_training_matrix <- filtered_training_matrix[, loc_highweights$Loc]
+filtered_testing_matrix <- filtered_testing_matrix[, loc_highweights$Loc]
+```
+
+## Remove most correlated sites 
+
+```{r}
+# ncol(filtered_training_matrix)
+# ncol(filtered_testing_matrix)
+# 
+# # identifying the most correlated sites (above 80% correlation)
+# cor_matrix <- cor(filtered_training_matrix)
+# high_cor_cols <- findCorrelation(cor_matrix, cutoff = 0.8)
+# 
+# filtered_training_matrix <- filtered_training_matrix[, -high_cor_cols]
+# filtered_testing_matrix <- filtered_testing_matrix[, -high_cor_cols]
+# 
+# ncol(filtered_training_matrix)
+# ncol(filtered_testing_matrix)
+```
+
+
+## Random subsetting with model 
+
+```{r}
+# Set the number of iterations for the loop
+num_iterations <- 300
+num_sites <- 651
+
+# Initialize vectors and list to store results
+mae_results <- numeric(num_iterations)
+num_sites_chosen <- numeric(num_iterations)
+cv_models <- list()
+subset_columns <- list()
+
+# Set seed for reproducibility
+set.seed(123)
+
+lowest_mae <- Inf
+best_model <- NULL
+best_subset <- NULL
+
+for (i in 1:num_iterations) {
+  # Randomly subset X columns from training_matrix
+  #subset_cols <- sample(ncol(training_matrix), num_sites)
+  subset_cols <- sample(ncol(filtered_training_matrix), num_sites)
+  
+  #subset_matrix <- training_matrix[, subset_cols]
+  subset_matrix <- filtered_training_matrix[, subset_cols]
+  
+  # Run cv.glmnet
+  cv_model <- cv.glmnet(x = subset_matrix, 
+                        y = age_training_vector, 
+                        alpha = 0, 
+                        nfolds = 10, 
+                        type.measure = "mae", 
+                        family = "gaussian", 
+                        standardize = FALSE)
+  
+  # Store the minimum MAE
+  current_mae <- min(cv_model$cvm)
+  mae_results[i] <- current_mae
+  
+  # Count non-zero coefficients at the optimal lambda
+  num_sites_chosen[i] <- sum(coef(cv_model, s = "lambda.min") != 0) - 1  # Subtract 1 to exclude intercept
+  
+  # Store the model and subset columns
+  cv_models[[i]] <- cv_model
+  subset_columns[[i]] <- subset_cols
+  
+  # Update best model if current MAE is lowest
+  if (current_mae < lowest_mae) {
+    lowest_mae <- current_mae
+    best_model <- cv_model
+    best_subset <- subset_cols
+  }
+}
+
+# Summarize results
+summary_results <- data.frame(
+  Iteration = 1:num_iterations,
+  MAE = mae_results,
+  NumSitesChosen = num_sites_chosen
+)
+
+# Print summary statistics
+cat("Summary of MAE:\n")
+print(summary(mae_results))
+
+cat("\nSummary of number of sites chosen:\n")
+print(summary(num_sites_chosen))
+
+# Find the iteration with the lowest MAE
+best_iteration <- which.min(mae_results)
+cat("\nBest iteration:", best_iteration)
+cat("\nLowest MAE:", mae_results[best_iteration])
+cat("\nNumber of sites chosen in best iteration:", num_sites_chosen[best_iteration])
+
+# Information about the best model
+cat("\n\nBest Model Information:")
+cat("\nLambda with lowest MAE:", best_model$lambda.min)
+cat("\nFeatures used in best model:", sum(coef(best_model, s = "lambda.min") != 0) - 1)
+
+# How the lowest features model performed 
+summary_results %>% arrange(NumSitesChosen)
+
+# Plot results
+plot(1:num_iterations, mae_results, type = "l", 
+     xlab = "Iteration", ylab = "MAE", 
+     main = "MAE across iterations")
+
+plot(1:num_iterations, num_sites_chosen, type = "l", 
+     xlab = "Iteration", ylab = "Number of sites chosen", 
+     main = "Number of sites chosen across iterations")
+
+# The best model is stored in 'best_model'
+# The columns used in the best model are stored in 'best_subset' (the sites)
+
+# best_training_subset <- training_matrix[, best_subset]
+# best_testing_subset <- testing_matrix[, best_subset]
+# best_full_subset <- full_matrix[, best_subset]
+
+best_training_subset <- filtered_training_matrix[, best_subset]
+best_testing_subset <- filtered_testing_matrix[, best_subset]
+best_full_subset <- full_matrix[, best_subset]
+
+## Training models 
+predicted_age <- as.data.frame(predict(best_model, newx=best_training_subset, s="lambda.min")) %>% 
+  rownames_to_column(var="GMGI_ID") %>% dplyr::rename(epi.age = lambda.min)
+
+predicted_age_testing <- as.data.frame(predict(best_model, newx=best_testing_subset, s="lambda.min")) %>% 
+  rownames_to_column(var="GMGI_ID") %>% dplyr::rename(epi.age = lambda.min)
+
+predicted_age_full <- as.data.frame(predict(best_model, newx=best_full_subset, s="lambda.min")) %>% rownames_to_column(var="GMGI_ID") %>% 
+  dplyr::rename(epi.age = lambda.min) %>% left_join(., meta, by = "GMGI_ID")
+
+## train and testing  
+predicted_age$group <- "training"
+predicted_age_testing$group <- "testing"
+
+predictions <- full_join(predicted_age, predicted_age_testing, by = join_by(GMGI_ID, epi.age, group)) %>%
+  left_join(., meta, by = "GMGI_ID")
+
+predictions %>%
+  ggplot(., aes(x=AgeRounded, y=epi.age)) + 
+  theme_classic() + 
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey70") +
+  geom_smooth(method='lm', se=FALSE, color= "grey", alpha=0.8) +
+  geom_point(aes(fill=group), size=3, alpha=0.8, color="black", shape=21) + 
+  scale_fill_manual(values = c("green4", "lightblue3")) +
+  xlim(0,12) + ylim(0,12) +
+  labs(fill = "Set",
+       #caption = "Figure 1: Comparison of epigenetic age and otolith age",
+       y = "Epigenetic Age",
+       x = "Otolith Age") +
+  theme(
+        legend.position="right",
+        legend.title = element_text(face="bold", size=18),
+        legend.text = element_text(size=16),
+        strip.text = element_text(face = "bold", size=16),
+        axis.title.y = element_text(margin = margin(t = 0, r = 15, b = 0, l = 0), size=20, face="bold"),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=20, face="bold"),
+        axis.text.x = element_text(color="black", size=16),
+        axis.text.y = element_text(color="black", size=16),
+        plot.caption = element_text(hjust = 0.75, size = 16, face = "italic")
+        ) +
+  stat_regline_equation(label.x=0.2, label.y = 11, size=6, aes(label = after_stat(rr.label))) +
+  ## adding stress value to plot (user edits x and y to desired location)
+  annotate(geom = "label", x = 0, y = 10, 
+           label = paste0("# Sites: ", num_sites_chosen[best_iteration]), hjust = 0, vjust = 1, 
+           label.size = NA, color = "black", size = 6, fill=NA) +
+  annotate(geom = "label", x = 0, y = 8.5, 
+           label = paste0("MAE: ", round(mae_results[best_iteration], 2)), hjust = 0, vjust = 1, 
+           label.size = NA, color = "black", size = 6, fill=NA)
+```
+
+
+
+
+
+## Archive: Estimating model with Elastic Net Regression 
+
+https://books.google.com/books?hl=en&lr=&id=2YXmEAAAQBAJ&oi=fnd&pg=PT111&dq=info:xmnrAcdob2UJ:scholar.google.com&ots=CrlH3dbMdW&sig=nSdnLKUEhz3rKDhXNR1eVdGWKZs#v=onepage&q&f=false 
+
+https://glmnet.stanford.edu/articles/glmnet.html
+
+https://github.com/marinegenomicslab/Epi-Age-Est/blob/main/Scripts/Elastic%20Net%20Regression.Rmd
+
+alpha parameter of 0.5 (considered the optimal merging of a ridge and lasso model; Thompson et al. 2017; Mayne et al. 2020; Bertucci et al. 2021). 
+
+cv.glmnet uses internal validated lambda values 
+
+In the below cv.glmnet function, "x" represents a matrix of percent methylation values at each site and in each sample; "y" represents a vector of chronological ages associated with each sample. In order to recreate the results presented in the study, use the below "x's" and "y's" for each respective species.
+
+```{r}
+## MAE = mean absolute error
+MAEs_train <- NULL
+for (i in 1:200){
+                 cv_train <- cv.glmnet(x = training_matrix, y = age_training_vector, alpha = 0, 
+                                       #x = full_matrix, y = age_full_vector, alpha = 0.5,
+                                 nfolds = 10, type.measure="mae", family="gaussian", standardize=FALSE)  
+                 MAEs_train <- cbind(MAEs_train, cv_train$cvm)
+}
+
+  MAEs_train <- data.frame(MAEs_train)
+  rownames(MAEs_train) <- cv_train$lambda
+  MAEs_train <- setDT(MAEs_train, keep.rownames = "lambda")[]
+  MAEs_train$mean.mae <- rowMeans(MAEs_train[ ,c(2:201)])
+  lambda.min.train <- min(MAEs_train$lambda)
+  min.mae.train <- min(MAEs_train$mean.mae)
+
+plot(cv_train)
+
+#Get no. of CpG sites selected by the elastic net model
+coefList_train <- coef(cv_train, s=cv_train$lambda.min)
+coefList_train <- data.frame(coefList_train@Dimnames[[1]][coefList_train@i+1],coefList_train@x)
+names(coefList_train) <- c('var','val')
+coefList_train <- coefList_train[-1, ]
+nrow(coefList_train)
+
+#Make age predictions using final model
+## PREDICT TRAINING SET
+y_hat_enet_train <- as.data.frame(predict(cv_fit, newx=training_matrix, s="lambda.min"))
+
+## PREDICT TESTING SET
+y_hat_enet_testing <- as.data.frame(predict(cv_fit, newx=testing_matrix, s="lambda.min"))
+
+## PREDICT FULL SET
+y_hat_enet_full <- as.data.frame(predict(cva_fit, newx=full_matrix, s="lambda.min"))
+```
+
+
+### Adding metadata back in 
+
+```{r}
+## train and testing
+predicted_age <- y_hat_enet_train %>% rownames_to_column(var="GMGI_ID") %>% dplyr::rename(epi.age = lambda.min)
+predicted_age_testing <- y_hat_enet_testing %>% rownames_to_column(var="GMGI_ID") %>% dplyr::rename(epi.age = lambda.min)
+
+predicted_age$group <- "training"
+predicted_age_testing$group <- "testing"
+
+predictions <- full_join(predicted_age, predicted_age_testing, by = join_by(GMGI_ID, epi.age, group)) %>%
+  left_join(., meta, by = "GMGI_ID")
+
+## full 
+predicted_age_full <- y_hat_enet_full %>% rownames_to_column(var="GMGI_ID") %>% 
+  dplyr::rename(epi.age = lambda.min) %>% left_join(., meta, by = "GMGI_ID")
+```
+
+# Plotting 
+
+```{r}
+predicted_age_full %>%
+  ggplot(., aes(x=AgeRounded, y=epi.age)) + theme_classic() + 
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey70") +
+  geom_smooth(method='lm', se=FALSE, color= "grey", alpha=0.8) +
+  geom_point(size=5, alpha=1, color="black", shape=21) + #aes(fill=group), 
+  #scale_fill_manual(values = c("green4", "lightblue3")) +
+  xlim(0,12) + ylim(0,12) +
+  labs("Set") +
+  ylab("Epigenetic Age") + xlab("Otolith Age") +
+  theme(#strip.background = element_blank(),
+        #axis.text.x=element_blank(),
+        #panel.background = element_rect(margin(1, 1, 1, 1, "cm")),
+        #plot.margin = margin(1, 1, 1, 1, "cm"),
+        strip.placement='outside',
+        legend.position="right",
+        legend.title = element_text(face="bold", size=12),
+        legend.text = element_text(size=10),
+        strip.text = element_text(face = "bold", size=14),
+        axis.title.y = element_text(margin = margin(t = 0, r = 15, b = 0, l = 0), size=20, face="bold"),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=20, face="bold"),
+        axis.text.x = element_text(color="black", size=14),
+        axis.text.y = element_text(color="black", size=14)) +
+  stat_regline_equation(label.x=0.2, label.y = 11, size=8, aes(label = after_stat(rr.label)))
+```
+
+
+```{r}
+predictions %>%
+  ggplot(., aes(x=AgeRounded, y=epi.age)) + 
+  theme_classic() + 
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey70") +
+  geom_smooth(method='lm', se=FALSE, color= "grey", alpha=0.8) +
+  geom_point(aes(fill=group), size=3, alpha=0.8, color="black", shape=21) + 
+  scale_fill_manual(values = c("green4", "lightblue3")) +
+  xlim(0,12) + ylim(0,12) +
+  labs(fill = "Set",
+       #caption = "Figure 1: Comparison of epigenetic age and otolith age",
+       y = "Epigenetic Age",
+       x = "Otolith Age") +
+  theme(
+        legend.position="right",
+        legend.title = element_text(face="bold", size=18),
+        legend.text = element_text(size=16),
+        strip.text = element_text(face = "bold", size=16),
+        axis.title.y = element_text(margin = margin(t = 0, r = 15, b = 0, l = 0), size=20, face="bold"),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=20, face="bold"),
+        axis.text.x = element_text(color="black", size=16),
+        axis.text.y = element_text(color="black", size=16),
+        plot.caption = element_text(hjust = 0.75, size = 16, face = "italic")
+        ) +
+  stat_regline_equation(label.x=0.2, label.y = 11, size=8, aes(label = after_stat(rr.label)))
+```
+
+
+
+

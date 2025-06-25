@@ -1,0 +1,508 @@
+---
+title: "Finding genomic location of significant loci"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+*Done on server RStudio*  
+
+https://figshare.com/articles/dataset/Assembly_and_annotation_for_haddock/5182861?file=8834818
+
+## Load libraries
+
+```{r}
+# if (!require("BiocManager")) install.packages("BiocManager")
+# BiocManager::install("GenomicRanges")
+# BiocManager::install("GenomicFeatures")
+# BiocManager::install("txdbmaker")
+
+library(GenomicRanges)
+library(IRanges)
+library(GenomicFeatures)
+library(txdbmaker)
+
+library(ggplot2)
+library(tidyverse)
+library(strex) ## for data transformation 
+library(fuzzyjoin)
+library(strex)
+```
+
+## Load data 
+
+Methylation data
+
+```{r}
+load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final.RData")
+head(df100_f4_agelength_final)
+length(unique(df100_f4_agelength_final$scaffold)) ## age related loci appear in 2,177 scaffolds out of ~8,420 
+
+#### 100% set 7731
+df100_f4_agelength_final <- df100_f4_agelength_final %>%
+  mutate(position = start+1,
+         scaffold = str_after_nth(scaffold, "\\|", 2)) %>%
+  relocate(position, .before=start) %>%
+  mutate(start = as.numeric(start),
+         stop = as.numeric(stop))
+
+#### 90% set
+load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
+df_f4_agelength_imputed <- results1 %>% rownames_to_column(var = "Loc") %>%
+  gather("GMGI_ID", "percent.meth", 2:last_col())
+
+#df_f4_agelength_imputed <- df_f4_agelength_imputed #%>%
+  # separate(Loc, c("scaffold", "position"), sep = " ", remove=FALSE) %>%
+  # mutate(position = as.numeric(position),
+  #        start = position-1,
+  #        stop = position+1,
+  #        scaffold = str_after_nth(scaffold, "\\|", 2))
+  
+  # mutate(position = start+1,
+  #        scaffold = str_after_nth(scaffold, "\\|", 2)) %>%
+  # relocate(position, .before=start) %>%
+  # mutate(start = as.numeric(start),
+  #        stop = as.numeric(stop))
+
+### Final clock 111
+clock_sites <- read_csv("/work/gmgi/Fisheries/epiage/haddock/clock_sites.csv") 
+# clock_sites$Loc <- sub("^(([^_]*_){2}[^_]*)_", "\\1 ", clock_sites$Loc)
+# clock_sites$Loc <- gsub("_", "|", clock_sites$Loc)
+
+clock_data <- df_f4_agelength_imputed %>% filter(Loc %in% clock_sites$Loc)
+clock_data$Loc <- sub("^(([^_]*_){2}[^_]*)_", "\\1 ", clock_data$Loc)
+clock_data$Loc <- gsub("_", "|", clock_data$Loc)
+clock_data %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/clock_data.csv")
+```
+
+gff information
+
+```{r}
+assembly_report <- read.delim2("/work/gmgi/Fisheries/reference_genomes/Haddock/GCA_900291075.1_MAEA_1_assembly_report.txt", skip = 25) %>% 
+  dplyr::rename(scaffold=1) %>% dplyr::select(scaffold, Sequence.Length)
+length(unique(assembly_report$scaffold))
+head(assembly_report)
+
+gff <- read.delim2("/work/gmgi/Fisheries/reference_genomes/Haddock/melAeg_maker.putative_function.domain_added.gff", header=F, skip=1) %>%
+  arrange(V1)
+
+# gff_aed <- read.delim2("/work/gmgi/Fisheries/reference_genomes/Haddock/melAeg_maker.putative_function.domain_added.aed_0.5.gff", 
+#                        header=F, skip=1) %>% arrange(V1)
+# head(gff_aed)
+
+## filtering out columns we don't need
+gff_edited <- gff %>%
+  subset(!V1=="###") %>%
+  filter(!is.na(V4))
+
+## assigning the genome scaffold name to the gtf scaffold name
+gff_scaffolds <- gff_edited %>% subset(V3=="contig") %>% 
+  dplyr::select(V1, Sequence.Length=V5) %>% distinct() %>%
+  arrange(desc(Sequence.Length)) %>%
+  mutate(scaffold = paste0("OLKM0100", sprintf("%04d", row_number()), ".1"))
+  
+## joining the genome scaffold name onto the gtf file
+gff_edited <- gff_edited %>% left_join(., gff_scaffolds %>% dplyr::select(-Sequence.Length), by = "V1") %>%
+  relocate(scaffold, .after=V1)
+
+unique(gff_edited$V3)
+
+gff_edited <- gff_edited %>% dplyr::rename(gff_scaffold=V1, feature_type=V3, start=V4, end=V5) %>%
+  mutate(start = as.numeric(start),
+         end = as.numeric(end))
+
+# gff_annotation <- gff_edited %>%
+#   separate(V9, into=c("ID", "Name", "Alias", "Note"), sep = ";", fill="right")
+```
+
+Calculating all genomic regions
+
+```{r}
+## 7,731 positions for 100% 
+methylation_data <- df100_f4_agelength_final %>% dplyr::select(Loc, scaffold, position) %>% distinct()
+## 47,373 positions for 90% 
+methylation90p_data <- df_f4_agelength_final %>% dplyr::select(Loc, scaffold, position) %>% distinct()
+## 111 loci for final clock
+methylation_clock_data <- clock_data %>% dplyr::select(Loc, scaffold, position) %>% distinct()
+
+# Create GRanges objects
+meth_gr <- GRanges(
+  seqnames = methylation_clock_data$scaffold,
+  ranges = IRanges(start = methylation_clock_data$position, width = 1)
+)
+################
+
+##### Gene regions only 
+gff_generegions <- gff_edited %>% filter(!grepl("match|contig", feature_type))
+
+# Create GRanges for gene regions from GFF
+gff_generegions_gr <- GRanges(
+  seqnames = gff_generegions$scaffold,
+  ranges = IRanges(start = gff_generegions$start, end = gff_generegions$end)
+)
+
+# Find overlaps between methylation positions and gene bodies
+overlaps <- findOverlaps(
+  meth_gr,
+  gff_generegions_gr,
+  type = "within"  # Use "any" if you want any overlap (not fully contained)
+)
+
+overlap_df <- data.frame(
+  methylation_data[queryHits(overlaps), ],  # Methylation info
+  gff_generegions[subjectHits(overlaps), ]  # Gene info
+) %>% dplyr::select(Loc, scaffold, position, feature_type, start, end)
+
+length(unique(overlap_df$Loc)) ## 3,535 100% ; 6,358 90%; 81 in clock 
+
+###### 1. IDENTIFY 5' UTR 
+five_prime_UTR <- overlap_df %>% subset(feature_type == "five_prime_UTR")  
+five_prime_UTR_list <- five_prime_UTR %>% pull(Loc) %>% unique() ### 46; 856; 2
+
+overlap_df <- overlap_df %>% filter(!Loc %in% five_prime_UTR_list)
+length(unique(overlap_df$Loc)) ## 3,489 ; 6,191; 79
+
+###### 2. IDENTIFY 3' UTR 
+three_prime_UTR <- overlap_df %>% subset(feature_type == "three_prime_UTR")  
+three_prime_UTR_list <- three_prime_UTR %>% pull(Loc) %>% unique() ### 66; 3
+
+overlap_df <- overlap_df %>% filter(!Loc %in% three_prime_UTR_list)
+length(unique(overlap_df$Loc)) ## 3,423 ; 6,014; 76
+
+###### 3. IDENTIFY CDS
+CDS <- overlap_df %>% subset(feature_type == "CDS")  
+CDS_list <- CDS %>% pull(Loc) %>% unique() ### 1,101; 1,922; 31
+
+overlap_df <- overlap_df %>% filter(!Loc %in% CDS_list)
+length(unique(overlap_df$Loc)) ## 2,322 ; 4,092; 45
+
+###### EXON = 46 + 66 + 1101 = 1,213 LOCI
+
+###### 4. IDENTIFY INTRONS
+gene <- overlap_df %>% subset(feature_type == "gene")  
+gene_list <- gene %>% pull(Loc) %>% unique() ### 2,322; 45
+
+# Convert all lists to data frames with feature labels
+genic_features <- bind_rows(
+  as.data.frame(five_prime_UTR_list) %>% mutate(feature_type = "five_prime_UTR") %>% dplyr::rename(Loc=1),
+  as.data.frame(three_prime_UTR_list) %>% mutate(feature_type = "three_prime_UTR") %>% dplyr::rename(Loc=1),
+  as.data.frame(CDS_list) %>% mutate(feature_type = "CDS") %>% dplyr::rename(Loc=1),
+  as.data.frame(gene_list) %>% mutate(feature_type = "gene") %>% dplyr::rename(Loc=1)
+)
+
+# Convert all lists to data frames with feature labels
+# genic_df <- bind_rows(gene, CDS, three_prime_UTR, five_prime_UTR
+# )
+
+# genic_features %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/geneoverlap_clock.csv")
+
+################### 
+## Calculating nongenic regions like promoters and terminators 
+promoter <- gff_edited %>% filter(grepl("gene", feature_type)) %>%
+  dplyr::select(scaffold, feature_type, start, end) %>%
+  
+  ## 1. promoter = -200 from start value in feature_type == gene
+  bind_rows(
+    filter(., feature_type == "gene") %>%
+      transmute(scaffold,
+                feature_type = "promoter",
+                start = start - 200,
+                end = start + 199)
+  ) %>% filter(start > 0) %>% arrange(start)
+  
+terminator <- gff_edited %>% filter(grepl("gene", feature_type)) %>%
+  dplyr::select(scaffold, feature_type, start, end) %>%   
+  ## 2. terminator = +200 from end value in feature_type == gene
+  bind_rows(
+    filter(., feature_type == "gene") %>%
+      transmute(scaffold,
+                feature_type = "terminator",
+                start = end + 1,
+                end = start + 199)
+  ) %>% filter(start > 0) %>% arrange(start)
+
+
+### 3. Now I need to remove any terminators or promoters that overlap with genes 
+genes_gr <- GRanges(
+  seqnames = gff_edited %>% filter(feature_type == "gene") %>% pull(scaffold),
+  ranges = IRanges(
+    start = gff_edited %>% filter(feature_type == "gene") %>% pull(start),
+    end = gff_edited %>% filter(feature_type == "gene") %>% pull(end)
+  )
+)
+
+#### removing promoters that overlap in genes 
+promoter_only <- promoter %>% subset(feature_type == "promoter")
+promoter_gr <- GRanges(
+  seqnames = promoter_only$scaffold,
+  ranges = IRanges(start = promoter_only$start, end = promoter_only$end),
+  feature_type = promoter_only$feature_type
+)
+
+promoter_gene_overlaps <- findOverlaps(promoter_gr, genes_gr, type = "any")
+
+clean_promoter <- promoter_only %>%
+  # Remove promoters that overlap genes
+  filter(
+    !(feature_type == "promoter" & 
+        row_number() %in% queryHits(promoter_gene_overlaps))
+  )
+
+#### removing terminators that overlap in gene regions 
+terminator_only <- terminator %>% subset(feature_type == "terminator")
+terminator_gr <- GRanges(
+  seqnames = terminator_only$scaffold,
+  ranges = IRanges(start = terminator_only$start, end = terminator_only$end),
+  feature_type = terminator_only$feature_type
+)
+
+terminator_gene_overlaps <- findOverlaps(terminator_gr, genes_gr, type = "any")
+
+clean_terminator <- terminator_only %>%
+  # Remove terminators that overlap genes
+  filter(
+    !(feature_type == "terminator" & 
+        row_number() %in% queryHits(terminator_gene_overlaps))
+  )
+
+##### Now comparing clean terminators / promoters with the methylation data 
+promoter_clean_gr <- GRanges(
+  seqnames = clean_promoter$scaffold,
+  ranges = IRanges(start = clean_promoter$start, end = clean_promoter$end),
+  feature_type = clean_promoter$feature_type
+)
+
+promoter_overlaps <- findOverlaps(
+  meth_gr,
+  promoter_clean_gr,
+  type = "within"  # Use "any" if you want any overlap (not fully contained)
+)
+
+promoter_overlaps_df <- data.frame(
+  methylation_data[queryHits(promoter_overlaps), ],  # Methylation info
+  gff_generegions[subjectHits(promoter_overlaps), ]  # Gene info
+) %>% dplyr::select(Loc, scaffold, position, feature_type, start, end)
+
+length(unique(promoter_overlaps_df$Loc))
+#### Promoters = 154 ; 104
+
+terminator_clean_gr <- GRanges(
+  seqnames = clean_terminator$scaffold,
+  ranges = IRanges(start = clean_terminator$start, end = clean_terminator$end),
+  feature_type = clean_terminator$feature_type
+)
+
+terminator_overlaps <- findOverlaps(
+  meth_gr,
+  terminator_clean_gr,
+  type = "within"  # Use "any" if you want any overlap (not fully contained)
+)
+
+terminator_overlaps_df <- data.frame(
+  methylation_data[queryHits(terminator_overlaps), ],  # Methylation info
+  gff_generegions[subjectHits(terminator_overlaps), ]  # Gene info
+) %>% dplyr::select(Loc, scaffold, position, feature_type, start, end)
+
+length(unique(terminator_overlaps_df$Loc)) ## Terminators = 114 ; 92
+```
+
+Graphing that 
+
+```{r}
+# Corrected code
+Exon_count <- length(unique(three_prime_UTR$Loc)) + length(unique(five_prime_UTR$Loc)) + length(unique(CDS$Loc))
+Gene_count <- Exon_count + length(unique(overlap_df$Loc))
+Other_count <- length(unique(methylation_data$Loc)) - Gene_count - length(unique(promoter_overlaps_df$Loc)) - length(unique(terminator_overlaps_df$Loc))
+  
+figure_data <- data.frame(
+  Region = c("UTR3", "UTR5", "CDS", "Intron", "Promoter", "Terminator", "Other"),
+  Value = c(length(unique(three_prime_UTR$Loc)),
+            length(unique(five_prime_UTR$Loc)),
+            length(unique(CDS$Loc)),
+            length(unique(overlap_df$Loc)), 
+            
+            length(unique(promoter_overlaps_df$Loc)), 
+            length(unique(terminator_overlaps_df$Loc)), 
+            Other_count
+            )) 
+
+figure_data %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/100p_genomiclocation.csv")
+
+sum(figure_data$Value)
+
+desired_order <- c("Promoter", "Terminator", "Other", "Intron", "CDS", "UTR5", "UTR3")
+
+figure_data %>% mutate(x="x") %>%
+  mutate(Region = factor(Region, levels = desired_order)) %>%
+  ggplot(., aes(x=x, y=Value)) + 
+  
+  geom_bar(stat = "identity", position = "stack", aes(fill=Region), color='grey20') +
+  labs(
+    y="Number of CpG Loci",
+    x="",
+    fill=""
+  ) +
+  scale_fill_manual(values = c("#F3FBEF", "#C2E1C4", "#9CC398", "#caf0f8", "#8ecae6", "#61a5c2", "#0077b6")) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_blank(),
+    legend.position = "right",
+    axis.text.y = element_text(size=10, color="black"),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=12, face="bold")
+  )
+
+ggsave("/work/gmgi/Fisheries/epiage/haddock/Genomic_locations_clock.png", width=4, height=5)
+```
+
+```{r}
+# Corrected code
+figure_data90p <- data.frame(
+  Region = c("UTR3", "UTR5", "CDS", "Intron", "Promoter", "Non-genic"),
+  Value = c(length(UTR3_hits90p), length(UTR5_hits90p), length(CDS_hits90p), 
+            length(Intron_hits90p), length(Promoter_hits90p), Other90p)
+) 
+
+desired_order <- c("Promoter", "Non-genic", "Intron", "CDS", "UTR5", "UTR3")
+
+figure_data90p %>% mutate(x="x") %>%
+  mutate(Region = factor(Region, levels = desired_order)) %>%
+  ggplot(., aes(x=x, y=Value)) + 
+  
+  geom_bar(stat = "identity", position = "stack", aes(fill=Region), color='grey20') +
+  labs(
+    y="Number of CpG Loci",
+    x="",
+    fill=""
+  ) +
+  scale_fill_manual(values = c("#cfe1b9", "#a1cca5", "#caf0f8", "#8ecae6", "#61a5c2", "#0077b6")) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_blank(),
+    legend.position = "right",
+    axis.text.y = element_text(size=10, color="black"),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=12, face="bold")
+  )
+
+ggsave("/work/gmgi/Fisheries/epiage/haddock/Genomic_locations_90p.png", width=4, height=5)
+```
+
+Only
+
+
+
+
+## Join number of loci and length information 
+
+```{r}
+scaffold_loci <- 
+  df100_f4_agelength_final %>% 
+  #df_f4_agelength_final %>%
+  #clock_data %>%
+  
+  group_by(scaffold) %>%
+  summarize(number_of_loci = n_distinct(Loc)) %>% 
+  arrange(desc(number_of_loci)) %>%
+  mutate(scaffold = str_extract(scaffold, "[^|]+$")) %>%
+  left_join(., assembly_report, by = "scaffold") 
+
+# scaffold_loci %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/scaffold_loci_length_clock.csv", row.names = FALSE)
+
+scaffolds <- clock_data %>%
+  mutate(scaffold = str_extract(scaffold, "[^|]+$")) %>% 
+  left_join(., assembly_report, by = "scaffold") %>% arrange(desc(Sequence.Length))
+
+# Create a cumulative sum for y-axis positioning
+scaffolds$y_pos <- cumsum(scaffolds$Sequence.Length) - scaffolds$Sequence.Length/2
+
+scaffold_loci %>%
+  mutate(scaffold = fct_reorder(scaffold, number_of_loci, .desc = FALSE)) %>%
+  ggplot(aes(x=scaffold, y=number_of_loci)) + 
+  geom_point(size=0.5) + 
+  theme_classic() +
+  labs(
+    y = "Number of Loci",
+    x = "Scaffold"
+  ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()  # This removes the x-axis tick marks
+  )
+
+scaffold_loci %>% 
+  mutate(density = number_of_loci / Sequence.Length) %>%
+  filter(density > 0.0005) %>%
+  ggplot(aes(x = reorder(scaffold, -density), y = density)) + 
+  geom_bar(stat = "identity", fill = "steelblue", color = NA, alpha=0.3) +
+  labs(x = "Scaffold", y = "Loci Density", title = "Density of Loci Across Scaffolds") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()  # This removes the x-axis tick marks
+        ) 
+
+
+#### Circulize this information 
+scaffold_loci %>%
+  mutate(
+    highlight = if_else(number_of_loci > 30, "High", "Low"),
+    line_size = if_else(highlight == "High", 1.2, 0.3)  # Thickness control
+  ) %>%
+  ggplot(aes(x = scaffold, y = number_of_loci)) +
+  geom_segment(
+    aes(xend = scaffold, yend = 0, color = highlight, linewidth = line_size),
+    show.legend = FALSE
+  ) +
+  scale_y_continuous(trans = "log10") +
+  scale_color_manual(values = c("High" = "#FF6B6B", "Low" = "gray70")) +
+  scale_linewidth_identity() +  # Use literal size values from data
+  coord_polar() +
+  theme_minimal() +
+  labs(title = "Highlighted Scaffolds with Thicker Spokes (>30 loci)") +
+  theme(
+    axis.text.x = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linewidth = 0.2, color = "gray85")
+  )
+
+scaffold_loci %>%  
+  arrange(scaffold) %>%
+  # Convert to factor with ordered levels
+  mutate(scaffold = factor(scaffold, levels = unique(scaffold))) %>%
+  
+  ggplot(aes(x = scaffold, y = number_of_loci)) +
+  geom_segment(
+    aes(xend = scaffold, yend = 0),
+    color = 'black', linewidth = 0.05,
+    show.legend = FALSE
+  ) +
+  scale_y_continuous(
+    #breaks = seq(0, max(log10(scaffold_loci$number_of_loci)), by = 1),  # 10-unit grid
+    #limits = c(0, 200),
+    trans = "log10"
+    #minor_breaks = NULL  # Remove minor breaks
+  ) +
+  coord_polar() +
+  theme_minimal() +
+  labs(
+    
+  ) +
+  theme(
+    axis.text.x = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linewidth = 0.2, color = "gray25", linetype = "dotted")
+  )
+
+ggsave("/work/gmgi/Fisheries/epiage/haddock/Scaffold_locations_90p_log.png", width=4, height=4)
+```
+
+
+

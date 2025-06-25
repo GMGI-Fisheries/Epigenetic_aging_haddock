@@ -1,0 +1,205 @@
+---
+title: "Filtering to significant loci from GLM"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load libraries
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+```
+
+## Load data 
+
+```{r}
+load("/work/gmgi/Fisheries/epiage/haddock/RData_Round2/df_all2.RData")
+df_all2 <- df
+rm(df)
+
+sig_col_names <- c("scaffold", "start", "term", "df1", "df2", "F.ratio", "Chisq", "p.value")
+stats_col_names <- c("scaffold", "start", "Max_Rhat", "n_eff")
+
+# Function to read and rename columns of a single file
+read_and_rename_sig <- function(file) {
+  df <- read.table(file, header = TRUE)  # Read the text file
+  colnames(df) <- sig_col_names  # Rename columns
+  return(df)
+}
+
+read_and_rename_stats <- function(file) {
+  df <- read.table(file, header = TRUE)  # Read the text file
+  colnames(df) <- stats_col_names  # Rename columns
+  return(df)
+}
+```
+
+## df100 filtered 4 data
+
+```{r}
+# Define the path where your text files are located (switch this to run df100 or df)
+#file_path <- "/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/"
+file_path <- "/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/"
+
+# List all text files in the directory
+sig_list_AL <- list.files(path = file_path, pattern = "sig_age_length_*", full.names = TRUE)
+sig_list_age <- list.files(path = file_path, pattern = "sig_age_*", full.names = TRUE)
+stats_list_AL <- list.files(path = file_path, pattern = "stats_age_length_*", full.names = TRUE)
+stats_list_age <- list.files(path = file_path, pattern = "stats_age_*", full.names = TRUE)
+
+# Read and rename columns for the first 12 files
+datalist_sig_AL <- lapply(sig_list_AL, read_and_rename_sig)
+datalist_sig_age <- lapply(sig_list_age, read_and_rename_sig)
+datalist_stats_AL <- lapply(stats_list_AL, read_and_rename_stats)
+datalist_stats_age <- lapply(stats_list_age, read_and_rename_stats)
+
+# Combine all data frames into one and view first 6 rows with head()
+df_sig_AL <- bind_rows(datalist_sig_AL); head(df_sig_AL)
+df_sig_age <- bind_rows(datalist_sig_age); head(df_sig_age)
+df_stats_AL <- bind_rows(datalist_stats_AL); head(df_stats_AL)
+df_stats_age <- bind_rows(datalist_stats_age); head(df_stats_age)
+```
+
+## Filter sig df 
+
+```{r}
+# Function to filter columns and export the result
+filter_sig <- function(df) {
+  
+  # Get the name of the input dataframe
+  df_name <- deparse(substitute(df))
+  
+  # Create the Loc column, filter by p.value, and store in df_filtered
+  df <- df %>% unite(Loc, c("scaffold", "start"), sep = " ", remove = FALSE)
+  df_filtered <- df %>% filter(p.value < 0.050)
+  
+  # Print the number of unique Loc values in the original and filtered data frames
+  cat("Unique locations in original data:", length(unique(df$Loc)), "\n")
+  cat("Unique locations in filtered data:", length(unique(df_filtered$Loc)), "\n")
+  
+  # Create the new name for the filtered dataframe
+  new_name <- paste0(df_name, "_filtered")
+  
+  # Assign the filtered dataframe to the new name in the global environment
+  assign(new_name, df_filtered, envir = .GlobalEnv)
+  
+  # Inform the user about the new dataframe
+  cat("Filtered dataframe exported as:", new_name, "\n")
+  
+}
+
+## apply to dfs
+filter_sig(df_sig_AL)
+filter_sig(df_sig_age)
+```
+
+## Filtering stats df 
+
+```{r}
+# Function to filter columns and export the result
+filter_stats <- function(df) {
+  
+  # Get the name of the input dataframe
+  df_name <- deparse(substitute(df))
+  
+  # Create the Loc column, filter by p.value, and store in df_filtered
+  df <- df %>% unite(Loc, c("scaffold", "start"), sep = " ", remove = FALSE)
+  df_filtered <- df %>% filter(Max_Rhat > 1.010 & n_eff < 2000)
+  
+  # Print the number of unique Loc values in the original and filtered data frames
+  cat("Unique locations in original data:", length(unique(df$Loc)), "\n")
+  cat("Unique locations in filtered data:", length(unique(df_filtered$Loc)), "\n")
+  
+  # Create the new name for the filtered dataframe
+  new_name <- paste0(df_name, "_filtered")
+  
+  # Assign the filtered dataframe to the new name in the global environment
+  assign(new_name, df_filtered, envir = .GlobalEnv)
+  
+  # Inform the user about the new dataframe
+  cat("Filtered dataframe exported as:", new_name, "\n")
+  
+}
+
+## apply to dfs
+filter_stats(df_stats_AL)
+filter_stats(df_stats_age)
+```
+
+Joining those two dfs for 100% 
+
+```{r}
+### df100 filtered4 age only (20,323 sites)
+df100_f4_age_list <- inner_join(df_stats_age_filtered, df_sig_age_filtered, 
+                            by = c("Loc", "scaffold", "start")) %>% dplyr::select(Loc) %>% distinct()
+
+df_sig_age_filtered %>% filter(Loc %in% df100_f4_age_list$Loc) %>% dplyr::select(Loc, p.value) %>% 
+  write.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_sig.csv")
+
+### df100 filtered4 age + length (7,731 sites)
+df100_f4_agelength_list <- inner_join(df_stats_AL_filtered, df_sig_AL_filtered,
+                            by = c("Loc", "scaffold", "start")) %>% dplyr::select(Loc) %>% distinct()
+
+df_sig_AL_filtered %>% filter(Loc %in% df100_f4_agelength_list$Loc) %>% dplyr::select(Loc, p.value) %>% 
+  write.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_AL_sig.csv")
+
+df100_f4_age_final <- df_all2 %>% right_join(., df100_f4_age_list, by = c("Loc"))
+df100_f4_agelength_final <- df_all2 %>% right_join(., df100_f4_agelength_list, by = c("Loc"))
+
+save(df100_f4_age_final, file = "/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_final.RData")
+save(df100_f4_agelength_final, file = "/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final.RData")
+```
+
+Joining those two dfs for 90% 
+
+Error to troubleshoot: df_sig_age_filterd has multiple rows.. some loci went twice? Probably GLM array script issue.
+
+```{r}
+length(unique(df_sig_age_filtered$Loc))
+
+### df100 filtered4 age only (124,836 sites)
+df_f4_age_list <- inner_join(df_stats_age_filtered, df_sig_age_filtered, 
+                            by = c("Loc", "scaffold", "start")) %>% dplyr::select(Loc) %>% distinct()
+
+df_sig_age_filtered %>% filter(Loc %in% df_f4_age_list$Loc) %>% dplyr::select(Loc, p.value) %>% 
+  write.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_sig.csv")
+
+### df100 filtered4 age + length (47,373 sites)
+df_f4_agelength_list <- inner_join(df_stats_AL_filtered, df_sig_AL_filtered,
+                            by = c("Loc", "scaffold", "start")) %>% dplyr::select(Loc) %>% distinct()
+
+df_sig_AL_filtered %>% filter(Loc %in% df_f4_agelength_list$Loc) %>% dplyr::select(Loc, p.value) %>% 
+  write.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig.csv")
+
+df_f4_age_final <- df_all2 %>% right_join(., df_f4_age_list, by = c("Loc"))
+df_f4_agelength_final <- df_all2 %>% right_join(., df_f4_agelength_list, by = c("Loc"))
+
+save(df_f4_age_final, file = "/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_final.RData")
+save(df_f4_agelength_final, file = "/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_final.RData")
+```
+
+
+
+
+
+
+
+
+
+
+
+

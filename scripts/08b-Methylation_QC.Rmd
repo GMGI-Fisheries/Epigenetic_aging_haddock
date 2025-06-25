@@ -1,0 +1,289 @@
+---
+title: "QC of WGBS and methylation pipeline"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+### Load libraries 
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readxl) ## read excel file 
+library(writexl) ## write excel file 
+library(strex)
+library(ggpubr)
+library(plotrix)
+library(cowplot)
+```
+
+
+## Read in data 
+
+Read in haddock alignment and bioinformatic processes data
+
+```{r}
+WGBS_data <- read_xlsx("data/01_QC/bismark_statistics.xlsx") %>% 
+  ## creating sample ID column 
+  mutate(GMGI_ID = str_before_first(`Sample Name`, "_")) %>% dplyr::select(-`Sample Name`) %>%
+  ## change proportions to percentages
+  mutate(across(`mCpG (%)`:`Duplicates (%)`, ~ .x*100))
+```
+
+Read in results from e.coli alignment and calculating conversion efficiency 
+
+```{r}
+ecoli_seq1 <- read.delim2(file = "data/03_bisulfite_conversion_efficiency/ecoli_seqrun1_align.txt", header=T) 
+ecoli_seq2 <- read.delim2(file = "data/03_bisulfite_conversion_efficiency/ecoli_seqrun2_align.txt", header=T) 
+
+ecoli <- full_join(ecoli_seq1, ecoli_seq2) %>%
+  mutate(., GMGI_ID = str_before_nth(File, "_", 1),
+         GMGI_ID = gsub("./", "", GMGI_ID)) %>% 
+  ## calculating percent aligned to ecoli genome
+  mutate(`Aligned (%)` = (Aligned.Reads/Total.Reads)*100) %>%
+  ## calculating bisulfite conversion efficiency
+  mutate(totalCHH = Methylated.CHHs + Unmethylated.CHHs,
+         totalCHG = Methylated.chgs + Unmethylated.chgs,
+         unmethCHH_CHG = Unmethylated.CHHs + Unmethylated.chgs,
+         total_CHH_CHG = totalCHH + totalCHG,
+         `Conversion Efficiency (%)` = (unmethCHH_CHG/total_CHH_CHG)*100) %>%
+  dplyr::select(GMGI_ID, `Aligned (%)`, `Conversion Efficiency (%)`)
+```
+
+Bring in metadata to combine with ecoli and wgbs data
+
+```{r}
+metadata <- read_xlsx("data/00_metadata/full_finclips_sampling.xlsx")
+labwork <- read_xlsx("C:/BoxDrive/Box/Science/Fisheries/Projects/Epigenetic Aging/_Haddock/Labwork/Haddock_labwork.xlsx", sheet = "Sample List") %>% dplyr::select(GMGI_ID, `Seq Rnd`)
+metadata <- full_join(metadata, labwork, by="GMGI_ID")
+
+data <- right_join(metadata, ecoli, by="GMGI_ID") 
+
+WGBS_data <- WGBS_data %>% left_join(., metadata, by = "GMGI_ID")
+WGBS_data$`Seq Rnd` <- as.character(WGBS_data$`Seq Rnd`)
+
+data$`Seq Rnd` <- as.character(data$`Seq Rnd`)
+```
+
+
+```{r}
+median(data$`Conversion Efficiency (%)`)
+mean(data$`Conversion Efficiency (%)`)
+std.error(data$`Conversion Efficiency (%)`)
+```
+
+
+## Bisulfite Conversion 
+
+```{r}
+data %>% write_xlsx("data/03_bisulfite_conversion_efficiency/total.xlsx")
+
+data %>% filter(`Conversion Efficiency (%)` < 96.00) %>% write_xlsx("data/03_bisulfite_conversion_efficiency/under96.xlsx")
+
+data %>% filter(`Conversion Efficiency (%)` < 97.00) %>% write_xlsx("data/03_bisulfite_conversion_efficiency/under97.xlsx")
+```
+
+
+```{r}
+data %>% dplyr::select(GMGI_ID, `Seq Rnd`, `Aligned (%)`, `Conversion Efficiency (%)`) %>%
+  gather("measurement", "value", 3:4) %>%
+  
+  ggplot(., aes(x=`Seq Rnd`, y=value)) +
+  geom_boxplot(outlier.shape=NA, aes(color=`Seq Rnd`), fill=NA) + 
+  geom_jitter(aes(fill=`Seq Rnd`), color='black', alpha=0.5, width=0.2, shape=21) +
+  labs(
+    y="",
+    x="Sequencing Round"
+  ) +
+  scale_color_manual(values = c("#264653", "#e07a5f")) +
+  scale_fill_manual(values = c("#264653", "#e07a5f")) +
+  facet_wrap(~measurement, scales = "free",
+             strip.position = "left"
+             ) +
+  theme_bw() +
+  theme(panel.background=element_blank(),
+        strip.background=element_blank(),
+        strip.text = element_text(size = 10, face="bold"),
+        legend.position = "none",
+        strip.clip = 'off',
+        strip.placement = "outside",
+        axis.text.y = element_text(size=10, color="grey30"),
+        axis.text.x = element_text(size=10, color="grey30"),
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=11, face="bold"),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=11, face="bold"))
+
+ggsave("data/03_bisulfite_conversion_efficiency/Bisulfite_Conversion_Efficiency.png", width=6, height=4)
+```
+
+## Quality Control metrics
+
+```{r}
+WGBS_data %>% dplyr::select(GMGI_ID, `Seq Rnd`, `mCpG (%)`, `mCHG (%)`, 
+                            `mCHH (%)`, `Cytosines (M)`, `Aligned (%)`, `Duplicates (%)`)  %>%
+  
+  gather("measurement", "value", 3:8) %>%
+  
+  ggplot(., aes(x=`Seq Rnd`, y=value)) +
+  geom_boxplot(outlier.shape=NA, aes(color=`Seq Rnd`), fill=NA) + 
+  geom_jitter(aes(fill=`Seq Rnd`), color='black', alpha=0.5, width=0.2, shape=21) +
+  labs(
+    y="",
+    x="Sequencing Round"
+  ) +
+  scale_color_manual(values = c("#264653", "#e07a5f")) +
+  scale_fill_manual(values = c("#264653", "#e07a5f")) +
+  facet_wrap(~measurement, scales = "free",
+             strip.position = "left"
+             ) +
+  theme_bw() +
+  theme(panel.background=element_blank(),
+        strip.background=element_blank(),
+        strip.text = element_text(size = 10, face="bold"),
+        legend.position = "none",
+        strip.clip = 'off',
+        strip.placement = "outside",
+        axis.text.y = element_text(size=10, color="grey30"),
+        axis.text.x = element_text(size=10, color="grey30"),
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=11, face="bold"),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=11, face="bold"))
+
+ggsave("data/01_QC/Bismark_quality_control.png", width=7, height=5)
+```
+
+## Global methylation change 
+
+```{r}
+under96 <- data %>% filter(`Conversion Efficiency (%)` < 96.00) %>% dplyr::select(GMGI_ID)
+
+WGBS_data %>% 
+  dplyr::select(GMGI_ID, AgeRounded, `Weight Kg`, `mCpG (%)`, `Ind Sex`, `Length Cm`, Maturity, sampling_season) %>%
+  filter(!GMGI_ID %in% under96$GMGI_ID) %>%
+  
+  mutate(`Ind Sex` = case_when(
+    `Ind Sex` == "F" ~ "Female",
+    `Ind Sex` == "M" ~ "Male"
+  )) %>%
+  
+  #ggplot(., aes(x=`Weight Kg`, y=`mCpG (%)`)) +
+  ggplot(., aes(x=AgeRounded, y=`mCpG (%)`)) +
+  #ggplot(., aes(x=`Length Cm`, y=`mCpG (%)`)) +
+  
+  #geom_smooth(aes(color=sampling_season, fill=sampling_season), alpha=0.1) + #color="grey70", fill="grey80"
+  geom_smooth(alpha=0.3, color='grey80', fill='grey90') +
+
+  #geom_boxplot(aes(group=AgeRounded)) +
+  geom_point(shape=21, color='black', alpha=0.7, size=2.5, aes(fill=`Length Cm`)) + #"#588157"
+  scale_fill_gradientn(colours = c("white", "#8ecae6", "#023047")) +
+  # scale_fill_manual(values = c("#98C1D9", "#3D5A80")) + 
+  # scale_color_manual(values = c("#98C1D9", "#3D5A80")) + 
+  
+  facet_wrap(~`Ind Sex`)+ 
+  labs(
+    #color = "Season",
+    fill = "Length (cm)"
+  ) +
+  
+  theme_classic() +
+  theme(axis.text = element_text(size=10, color="grey30"),
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=11, face="bold"),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=11, face="bold"),
+        strip.text = element_text(color = "black", face = "bold", size = 12)
+        
+        )
+
+ggsave("manuscript figures/Supplemental_Figure3_alt.png", width=8, height=4)
+```
+
+```{r}
+WGBS_data %>% 
+  dplyr::select(GMGI_ID, AgeRounded, `Weight Kg`, `mCpG (%)`, `Ind Sex`, `Length Cm`, Maturity, sampling_season) %>%
+  filter(!GMGI_ID %in% under96$GMGI_ID) %>%
+  
+  ggplot(., aes(x=AgeRounded, y=`Length Cm`)) +
+  
+  geom_point(aes(fill=`mCpG (%)`), shape=21, size=2.5) +
+  scale_fill_gradientn(
+  colours = c("white", "#8ecae6", "#023047")
+  ) +
+  facet_wrap(~`Ind Sex`)+
+  theme_bw()
+
+WGBS_data %>% 
+  filter(!GMGI_ID %in% under96$GMGI_ID) %>%
+  ggplot(., aes(x=`Longitude Dec`, y=`Latitude Dec`)) +
+  geom_point(aes(fill=`mCpG (%)`), shape=21, size=2.5) +
+  scale_fill_gradientn(
+  colours = c("white", "#8ecae6", "#023047")
+  ) +
+  facet_wrap(~`Ind Sex`)+
+  theme_bw()
+```
+```{r}
+WGBS_data %>% 
+  dplyr::select(GMGI_ID, AgeRounded, `Weight Kg`, `mCpG (%)`, `Ind Sex`, `Length Cm`, Maturity, sampling_season) %>%
+  filter(!GMGI_ID %in% under96$GMGI_ID) %>%
+  
+  ggplot(., aes(x=Maturity, y=AgeRounded)) +
+  geom_boxplot(width=0.5, outlier.shape = NA) +
+  geom_jitter(width=0.1, shape=21) +
+  facet_wrap(~`Ind Sex`) +
+  theme_bw()
+```
+
+
+
+```{r}
+male_data <- WGBS_data %>% subset(`Ind Sex`=="M")
+
+summary(aov(lm(WGBS_data$`mCpG (%)` ~ WGBS_data$AgeRounded, data=male_data)))
+summary(aov(lm(WGBS_data$`mCpG (%)` ~ WGBS_data$`Weight Kg`, data=male_data)))
+summary(aov(lm(WGBS_data$`mCpG (%)` ~ WGBS_data$`Length Cm`, data=male_data)))
+
+female_data <- WGBS_data %>% subset(`Ind Sex`=="F")
+
+summary(aov(lm(WGBS_data$`mCpG (%)` ~ WGBS_data$AgeRounded, data=female_data)))
+summary(aov(lm(WGBS_data$`mCpG (%)` ~ WGBS_data$`Weight Kg`, data=female_data)))
+summary(aov(lm(WGBS_data$`mCpG (%)` ~ WGBS_data$`Length Cm`, data=female_data)))
+
+```
+
+
+```{r}
+CV_sex <- WGBS_data %>%
+  dplyr::select(GMGI_ID, `mCpG (%)`, AgeRounded, `Ind Sex`) %>%
+  group_by(AgeRounded, `Ind Sex`) %>%
+  summarise(CV = sd(`mCpG (%)`, na.rm = TRUE) / mean(`mCpG (%)`, na.rm = TRUE) * 100) 
+
+CV_sex %>%
+  ggplot(., aes(x=`Ind Sex`, CV)) +
+  geom_boxplot(outlier.shape = NA, width=0.5) +
+  geom_jitter(shape=21, size=2, width=0.2) +
+  theme_bw()
+
+t.test(data=CV_sex, CV~`Ind Sex`)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

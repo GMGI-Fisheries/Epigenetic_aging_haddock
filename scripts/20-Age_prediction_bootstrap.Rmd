@@ -1,0 +1,1084 @@
+---
+title: "Elastic Net Regression Modeling: Bootstrap version"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Load libraries 
+
+Change the results, error, warning, and message parameters the first time loading this packages to double check for any error or warning messages regarding package loading 
+
+```{r, results='hide', error=FALSE, warning=FALSE, message=FALSE}
+# Load necessary libraries
+library(readxl)   # read Excel files
+library(writexl)  # write Excel files
+library(plyr)     # needs to be loaded before dplyr
+library(dplyr)    # data manipulation
+library(tidyverse) # includes dplyr, tidyr, readr, purrr, and more
+library(ggplot2)  # plotting (included in tidyverse but listed explicitly for clarity)
+library(Rmisc)    # for summarySE()
+library(janitor)  # for clean_names()
+library(glmnet)   # for generalized linear models
+library(data.table) # for efficient data manipulation
+library(lme4)     # for linear mixed effects models
+library(car)      # for regression diagnostics
+library(ggpubr)   # for ggplot2 extensions
+library(tidymodels) # for modeling and machine learning
+library(caret)    # for machine learning and regression
+library(psych)    # for psychological statistics
+library(bestNormalize) # for data normalization
+library(emmeans)  # for estimated marginal means
+library(rstanarm) # for Bayesian models
+library(coda)     # for Markov chain Monte Carlo diagnostics
+library(parallel) # for parallel processing
+library(glmnetUtils)
+
+# Note: tidyverse includes tidyr, readr, purrr, and other packages.
+#       Loading tidyverse reduces the need to load these individually.
+```
+
+# Load data 
+
+```{r}
+under96BC <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/conversion_eff/under96.xlsx")
+
+## adding metadata 
+meta <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.xlsx", 
+                  sheet = "Sample List") %>% 
+  dplyr::select(GMGI_ID, Length, Sex, AgeRounded, Season) %>%
+  filter(!GMGI_ID %in% under96BC$GMGI_ID) # %>%
+  
+ # filter(AgeRounded <8)
+
+  #  ## testing removing outliers 
+  # filter(!GMGI_ID=="Mae-285") %>%
+  # filter(!GMGI_ID=="Mae-424") %>%
+  # filter(!GMGI_ID=="Mae-422") %>%
+  # filter(!GMGI_ID=="Mae-500") %>%
+  # filter(!GMGI_ID=="Mae-299")
+
+  # removing age classes with low sample sizes 
+  # filter(!GMGI_ID=="Mae-475") %>%
+  # filter(!GMGI_ID=="Mae-304") %>%
+  # filter(!GMGI_ID=="Mae-510")
+```
+
+```{r}
+load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final.RData")
+
+## 90% df4 age and age + length from 19-Missing values script 
+load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
+df_f4_agelength_imputed <- results1 %>% rownames_to_column(var = "Loc") %>%
+  gather("GMGI_ID", "percent.meth", 2:last_col()) %>%
+  left_join(., meta, by = "GMGI_ID")
+
+sig_values <- 
+  # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_AL_sig.csv") %>% 
+  # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_sig.csv") %>%
+  # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_sig.csv") %>%
+  read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig.csv") %>%
+  dplyr::select(-X) %>%
+  arrange(p.value) %>%
+  slice_head(prop = 0.20) %>%
+  
+  ### below only needed for imputed values 
+  mutate(Loc = gsub(" ", "_", Loc),
+         Loc = gsub("\\|", "_", Loc))
+```
+
+## Filter data 
+
+```{r}
+df <- 
+  # df_f4_agelength_imputed %>%
+  # dplyr::select(-Length, -Sex, -Season)  %>%
+  
+  df100_f4_agelength_final %>%
+  dplyr::select(-`Length Cm`, -`Ind Sex`, -sampling_season) %>%
+  dplyr::rename(GMGI_ID = sample) %>%
+  
+  filter(!GMGI_ID %in% under96BC$GMGI_ID) # %>%
+  
+  # filter(AgeRounded <8)
+  
+  # filter(!GMGI_ID=="Mae-285") %>%
+  # filter(!GMGI_ID=="Mae-424") %>%
+  # filter(!GMGI_ID=="Mae-422") %>%
+  # filter(!GMGI_ID=="Mae-500") %>%
+  # filter(!GMGI_ID=="Mae-299")
+
+  # removing age classes with low sample sizes 
+  # filter(!GMGI_ID=="Mae-475") %>%
+  # filter(!GMGI_ID=="Mae-304") %>%
+  # filter(!GMGI_ID=="Mae-510")
+
+## FILTER TO MOST SIGNIFICANT SITES
+## filter for top % most significant sites
+# df <- df %>% filter(Loc %in% sig_values$Loc)
+length(unique(df$Loc)) 
+## 9,474 loci
+
+## REMOVE OR SUBSET TO HIGHLY CORRELATED SITES
+# df_wide <- df %>% spread(Loc, percent.meth)
+# x_matrix <- as.matrix(df_wide[,-(1:2)])
+# 
+# corr_matrix <- corr.test(x = as.matrix(x_matrix), y = df_wide[, 2], 
+#                          use="pairwise", method="pearson", adjust="BH", alpha=0.05)
+# corr_results <- data.frame(corr_matrix$r, corr_matrix$p.adj)
+# corr_results <- tibble::rownames_to_column(corr_results, "Loc")
+# colnames(corr_results) <- c("Loc", "r", "padj")
+# corr_results$absr <- abs(corr_results$r) ## r = correlation coefficients
+# quant <- quantile(corr_results$absr, 0.5, na.rm = TRUE)
+# loc_highr <- corr_results %>%
+#   filter(absr > quant)
+
+# df <- df %>% filter(Loc %in% loc_highr$Loc)
+
+length(unique(df$Loc)) 
+## 9,474 loci
+## 2,369 loci w/ 0.75 corr filtering
+## 4,737 loci w/ 0.5 corr filtering
+```
+
+## Create lapply function for 100 iterations of 70/30 split or 80/20 split 
+
+With making sure rare ages in the training set 
+
+```{r}
+# bootstrap_sample_splits <- function(data, iterations = 100) {
+#   split_samples_df <- list()
+#   
+#   # NEW: Identify rare age classes (n < 2)
+#   rare_ages <- data %>%
+#     count(AgeRounded) %>%
+#     filter(n < 2) %>%
+#     pull(AgeRounded)
+#   
+#   for (i in 1:iterations) {
+#     # Create initial split
+#     splits <- initial_split(data, strata = AgeRounded, prop = 0.7)
+#     age_training <- training(splits)
+#     age_test <- testing(splits)
+#     
+#     # NEW: Force rare ages into training set
+#     rare_samples <- data %>% filter(AgeRounded %in% rare_ages)
+#     age_training <- bind_rows(age_training, rare_samples) %>% distinct()
+#     age_test <- age_test %>% filter(!GMGI_ID %in% rare_samples$GMGI_ID)
+#     
+#     # Existing processing code
+#     age_training_list <- age_training %>% select(GMGI_ID)
+#     age_test_list <- age_test %>% select(GMGI_ID)
+#     
+#     df_significant_train <- left_join(age_training_list, df, by = "GMGI_ID")
+#     df_significant_test <- left_join(age_test_list, df, by = "GMGI_ID")
+#     
+#     column_to_use <- "percent.meth"
+#     
+#     training_matrix <- df_significant_train %>%
+#       select(GMGI_ID, Loc, column_to_use) %>%
+#       spread(Loc, column_to_use) %>%
+#       arrange(GMGI_ID) %>%
+#       column_to_rownames(var="GMGI_ID") %>%
+#       as.matrix()
+#     
+#     testing_matrix <- df_significant_test %>%
+#       select(GMGI_ID, Loc, column_to_use) %>%
+#       spread(Loc, column_to_use) %>%
+#       arrange(GMGI_ID) %>%
+#       column_to_rownames(var="GMGI_ID") %>%
+#       as.matrix()
+#     
+#     age_training_vector <- df_significant_train %>%
+#       select(GMGI_ID, AgeRounded) %>%
+#       distinct() %>%
+#       arrange(GMGI_ID) %>%
+#       pull(AgeRounded)
+#     
+#     split_samples_df[[i]] <- list(
+#       training = training_matrix,
+#       testing = testing_matrix,
+#       age_vector = age_training_vector
+#     )
+#   }
+#   
+#   return(split_samples_df)
+# }
+# 
+# # Run bootstrap 
+# bootstrap_samples_df <- bootstrap_sample_splits(meta, iterations = 100)
+# 
+# ## View example of one output that has 2 dataframes: training and testing that are df_significant_train
+# # bootstrap_samples_df[1]
+```
+
+
+```{r}
+# Define function
+bootstrap_sample_splits <- function(data, iterations = 100) {
+  split_samples_df <- list()
+
+  for (i in 1:iterations) {
+    # Create a 70/30 split
+    splits <- initial_split(data, strata = AgeRounded, prop = 0.7)
+    age_training <- training(splits)
+    age_test <- testing(splits)
+
+    # Create training and test lists
+    age_training_list <- age_training %>% dplyr::select(GMGI_ID)
+    age_test_list <- age_test %>% dplyr::select(GMGI_ID)
+
+    # Join with df
+    df_significant_train <- left_join(age_training_list, df, by = "GMGI_ID")
+    df_significant_test <- left_join(age_test_list, df, by = "GMGI_ID")
+
+    ## Chosing what data to use
+    column_to_use <- "percent.meth"
+    #column_to_use <- "normalized_meth"
+
+    # Create training matrix
+    training_matrix <- df_significant_train %>% dplyr::select(GMGI_ID, Loc, column_to_use) %>%
+                        spread(Loc, column_to_use) %>% arrange(GMGI_ID) %>% column_to_rownames(var="GMGI_ID")
+    training_matrix <- as.matrix(training_matrix)
+
+    # Create testing matrix
+    testing_matrix <- df_significant_test %>% dplyr::select(GMGI_ID, Loc, column_to_use) %>%
+                        spread(Loc, column_to_use) %>%  arrange(GMGI_ID) %>% column_to_rownames(var="GMGI_ID")
+    testing_matrix <- as.matrix(testing_matrix)
+
+    # Creating age vector from training set
+    age_training <- df_significant_train %>% dplyr::select(GMGI_ID, AgeRounded) %>% distinct() %>%
+                      arrange(GMGI_ID) %>% dplyr::select(AgeRounded)
+    age_training_vector <- age_training$AgeRounded
+
+    # Store split_samples_df
+    split_samples_df[[i]] <- list(
+      training = training_matrix,
+      testing = testing_matrix,
+      age_vector = age_training_vector
+    )
+  }
+
+  return(split_samples_df)
+}
+
+# Run bootstrap
+bootstrap_samples_df <- bootstrap_sample_splits(meta, iterations = 100)
+
+## View example of one output that has 2 dataframes: training and testing that are df_significant_train
+```
+
+## Create an lapply function for iterative lasso models for each sample set
+
+```{r}
+perform_lasso <- function(bootstrap_sample, round_num) {
+  cat(sprintf("\n### Round %d\n", round_num))
+  
+  training_matrix <- bootstrap_sample$training
+  testing_matrix <- bootstrap_sample$testing
+  age_training_vector <- bootstrap_sample$age_vector
+  
+  CVGLM <- cv.glmnet(x = training_matrix,
+                     y = age_training_vector,
+                     nfolds = nrow(training_matrix),
+                     alpha = 0,
+                     type.measure = "mae",
+                     family = "gaussian",
+                     grouped = FALSE)
+  
+  cat("Minimum MAE:", min(CVGLM$cvm), "\n")
+  
+  coefList <- coef(CVGLM, s = CVGLM$lambda.min)
+  coefList <- data.frame(Loc = coefList@Dimnames[[1]][coefList@i + 1],
+                         Weight = coefList@x)[-1, ]
+  coefList$AbsWeight <- abs(coefList$Weight)
+  
+  loc_highweights <- coefList %>%
+    filter(AbsWeight > quantile(AbsWeight, 0.25))
+  
+  list(
+    n_sites = loc_highweights,
+    training = training_matrix[, loc_highweights$Loc],
+    testing = testing_matrix[, loc_highweights$Loc],
+    age_vector = age_training_vector
+  )
+}
+
+# Function to process all rounds for a single bootstrap sample
+### CHANGE THE NUMBER OF ITERATIONS AS DESIRED
+lasso_process_bootstrap_sample <- function(bootstrap_sample, num_rounds = 5) {
+  filtered_matrices <- bootstrap_sample
+  
+  for (i in 1:num_rounds) {
+    filtered_matrices <- perform_lasso(filtered_matrices, i)
+  }
+  
+  return(filtered_matrices)
+} 
+
+# Process all bootstrap samples
+# lasso_processed_samples <- lapply(bootstrap_samples_df, lasso_process_bootstrap_sample)
+lasso_processed_samples <- mclapply(bootstrap_samples_df, lasso_process_bootstrap_sample, mc.cores = detectCores() - 1)
+
+# If you want to see the results for a specific bootstrap sample (e.g., the first one):
+filtered_result_sample_1 <- lasso_processed_samples[[1]]
+filtered_result_sample_1$n_sites
+
+## 2,997 loci included from 9,474 after lasso x4
+## 749 loci included from 2,369 after lasso x4 from corr=0.75
+## 1,498 loci included from 4,737 loci after lasso x4 from corr=0.5
+## 2,247 loci included from 9,474 after lasso x5
+## 1,685 loci included from 9,474 after lasso x6
+## 1,263 loci included from 9,474 after lasso x7
+## 947 loci included from 9,474 after lasso x8
+## 710 loci included from 9,474 after lasso x9 
+## 532 after lasso x10
+
+# filtered_result_sample_1$training
+## 1,833 loci after 5 rounds 
+```
+
+## Add correlation step and take top 150 correlated sites 
+
+```{r}
+age_list <- meta %>% arrange(AgeRounded) %>% dplyr::select(GMGI_ID, AgeRounded)
+
+## 1,263 loci correlation to age metrics 
+sort(filtered_result_sample_1$age_vector) ## ordering by age 
+## ordering rows by age 
+
+sorted_training <- filtered_result_sample_1$training %>%
+  as.data.frame() %>% rownames_to_column(var = "GMGI_ID") %>%
+  right_join(age_list, ., by = "GMGI_ID") %>% arrange(AgeRounded) %>%
+  column_to_rownames(var = "GMGI_ID")
+
+age_order <- sorted_training$AgeRounded
+
+sorted_training <- sorted_training %>% dplyr::select(-AgeRounded)
+```
+
+
+```{r}
+# sample = lasso_processed_samples[[1]]
+
+correlation_results <- lapply(lasso_processed_samples, function(sample) {
+  
+  # Set up Age order information
+  ### Training
+  sorted_training <- sample$training %>%
+        as.data.frame() %>% rownames_to_column(var = "GMGI_ID") %>%
+        right_join(age_list, ., by = "GMGI_ID") %>% arrange(AgeRounded) %>%
+        column_to_rownames(var = "GMGI_ID")
+  
+  ### Testing
+  sorted_testing <- sample$testing %>%
+        as.data.frame() %>% rownames_to_column(var = "GMGI_ID") %>%
+        right_join(age_list, ., by = "GMGI_ID") %>% arrange(AgeRounded) %>%
+        column_to_rownames(var = "GMGI_ID") %>% dplyr::select(-AgeRounded)
+
+  age_order <- sorted_training$AgeRounded
+
+  sorted_training <- sorted_training %>% dplyr::select(-AgeRounded)
+  
+  # Calculate correlations
+  cor_data <- sapply(colnames(sorted_training), function(feature) {
+    ct <- cor.test(sorted_training[, feature], age_order)
+    c(correlation = unname(ct$estimate), p_value = ct$p.value)  # Critical unname()
+  })
+  
+  # Convert to data frame and clean up
+  cor_df <- as.data.frame(t(cor_data))
+  colnames(cor_df) <- c("correlation", "p_value")
+  
+  # Select top correlations
+  topcorr <- cor_df %>%
+    tibble::rownames_to_column("Loc") %>%
+    arrange(p_value) %>%
+    slice_head(n = 150)
+  
+  # Return structured list containing all elements
+  list(
+    age_vector = age_order,
+    training = sorted_training,
+    testing = sorted_testing,
+    correlations = cor_data,
+    correlations_df = topcorr
+  )
+})
+
+### I was stuck on the 300 piece but now it magically works?? Maybe it was a library issue before?
+sample <- correlation_results[[1]]
+```
+
+Most correlated straight into elastic net 
+
+```{r}
+elastic_top300results <- lapply(seq_along(correlation_results), function(i) {
+  sample <- correlation_results[[i]]  # Access current sample using index
+  
+  # Get the top 300 Loc identifiers
+  top300 <- sample$correlations_df$Loc
+  
+  # Filter matrices (keep only columns in top300)
+  filtered_training <- sample$training[, colnames(sample$training) %in% top300]
+  filtered_testing <- sample$testing[, colnames(sample$testing) %in% top300]
+  
+  age_training_vector <- sample$age_vector
+  
+  # Elastic Net
+  cv_model <- cv.glmnet(x = as.matrix(filtered_training),  # Convert to matrix
+                        y = age_training_vector, 
+                        alpha = 0, 
+                        nfolds = 10,
+                        type.measure = "mae",
+                        family = "gaussian",
+                        standardize = FALSE)
+  
+  # Best model
+  best_model <- cv_model$glmnet.fit
+  lambda_min <- cv_model$lambda.min
+  
+  # Extract non-zero coefficients at optimal lambda
+  coef_list <- coef(cv_model, s = "lambda.min")
+  non_zero_indices <- which(coef_list != 0)[-1]  # Exclude intercept
+  
+  # Get actual column names for selected sites
+  selected_sites <- colnames(filtered_training)[non_zero_indices]  # Get NAMES from filtered matrix
+  num_sites <- length(selected_sites)  # Count of selected sites
+  
+  # Predictions
+  predicted_age <- data.frame(
+    GMGI_ID = rownames(filtered_training),
+    epi.age = as.numeric(predict(cv_model, 
+                                newx = as.matrix(filtered_training), 
+                                s = lambda_min)),
+    group = "training"
+  )
+  
+  predicted_age_testing <- data.frame(
+    GMGI_ID = rownames(filtered_testing),
+    epi.age = as.numeric(predict(cv_model, 
+                                newx = as.matrix(filtered_testing), 
+                                s = lambda_min)),
+    group = "testing"
+  )
+  
+  # Combine predictions
+  predictions <- full_join(predicted_age, predicted_age_testing, by = join_by(GMGI_ID, epi.age, group)) %>%
+    left_join(., meta, by = "GMGI_ID") %>%
+    mutate(epi.age = pmax(epi.age, 0))
+  
+  MAE <- mean(abs(predictions$epi.age - predictions$AgeRounded))
+  
+  # Visualization
+  plot <- predictions %>%
+    ggplot(aes(x = AgeRounded, y = epi.age)) + 
+    theme_classic() + 
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey70") +
+    geom_smooth(method = 'lm', se = FALSE, color = "grey", alpha = 0.8) +
+    geom_point(aes(fill = group), size = 3, alpha = 0.8, color = "black", shape = 21) + 
+    scale_fill_manual(values = c("#588157", "grey90")) +
+    xlim(0,12) + ylim(0,12) +
+    labs(fill = "Set",
+         y = "Epigenetic Age",
+         x = "Otolith Age") +
+    theme(
+      legend.position="right",
+      legend.title = element_text(face="bold", size=18),
+      legend.text = element_text(size=16),
+      strip.text = element_text(face="bold", size=16),
+      axis.title.y = element_text(margin=margin(t=0,r=15,b=0,l=0),size=20,face="bold"),
+      axis.title.x = element_text(margin=margin(t=10,r=0,b=0,l=0),size=20,face="bold"),
+      axis.text.x=element_text(color="black",size=16),
+      axis.text.y=element_text(color="black",size=16),
+      plot.caption=element_text(hjust=0.75,size=16,face="italic")
+    ) +
+    stat_regline_equation(label.x=0.2,label.y=11,size=6,aes(label=after_stat(rr.label))) +
+    
+    annotate(geom="label",x=0,y=10,
+             label=paste0("# Sites: ", num_sites),
+             hjust=0,vjust=1,label.size=NA,color="black",size=6,fill=NA) +
+    
+    annotate(geom="label",x=0,y=8.5,
+             label=paste0("MAE: ", round(MAE, 2)),
+             hjust=0,vjust=1,label.size=NA,color="black",size=6,fill=NA)
+  
+  # Save plot with proper index
+  ggsave(filename=paste0("/work/gmgi/Fisheries/epiage/haddock/modelplots/5-1-2025_3_Lassox7_top150lasso/",
+                        "5-1-2025_1_Lassox7_top150lasso_bootstrap_", i, "_plot.png"), 
+        plot=plot, width=7, height=5.5)
+  
+  # Return important results
+  list(
+    filtered_training = filtered_training,
+    filtered_testing = filtered_testing,
+    cv_model = cv_model,
+    predictions = predictions,
+    num_sites = num_sites,
+    MAE = MAE,
+    plot = plot
+  )
+})
+
+```
+
+
+
+## Create function to take the filtered matrix from lasso x4 to elastic net function 
+
+```{r}
+## Define function to perform random subset analysis on processed samples
+run_random_subsets <- function(filtered_sample, num_iterations = 500, num_sites = 650) {
+  # Initialize storage
+  mae_results <- numeric(num_iterations)
+  num_sites_chosen <- numeric(num_iterations)
+  cv_models <- list()
+  subset_columns <- list()
+  lowest_mae <- Inf
+  best_model <- NULL
+  best_subset <- NULL
+  
+  # Extract matrices from processed sample
+  filtered_training_matrix <- filtered_sample$training
+  filtered_testing_matrix <- filtered_sample$testing
+  age_training_vector <- filtered_sample$age_vector
+  
+  # Validation check
+  if(num_sites > ncol(filtered_training_matrix)) {
+    stop("Requested number of sites exceeds available features in filtered matrix")
+  }
+  
+  for (i in 1:num_iterations) {
+    subset_cols <- sample(ncol(filtered_training_matrix), num_sites)
+    subset_matrix <- filtered_training_matrix[, subset_cols]
+    
+    cv_model <- cv.glmnet(x = subset_matrix, 
+                          y = age_training_vector, 
+                          alpha = 0.02, 
+                          nfolds = 10,
+                          type.measure = "mae",
+                          family = "gaussian",
+                          standardize = FALSE)
+    
+    # Store results
+    current_mae <- min(cv_model$cvm)
+    mae_results[i] <- current_mae
+    
+    # Extract non-zero coefficients at optimal lambda
+    coef_list <- coef(cv_model, s = "lambda.min")
+    non_zero_indices <- which(coef_list != 0)[-1] # Exclude intercept (first coefficient)
+    
+    # Get actual column names or indices for selected sites
+    selected_sites <- subset_cols[non_zero_indices]
+    
+    num_sites_chosen[i] <- length(selected_sites)
+    
+    # Store both input and selected sites
+    cv_models[[i]] <- cv_model
+    subset_columns[[i]] <- list(
+      input_sites = subset_cols,
+      selected_sites = selected_sites
+    )
+  }
+  
+  # Identify the best model based on the lowest MAE
+  best_iteration <- which.min(mae_results)
+  
+  return(list(
+    all_mae = mae_results,
+    all_sites_chosen = num_sites_chosen,
+    all_models = cv_models,
+    all_subsets = subset_columns,
+    
+    best_model = cv_models[[best_iteration]],
+    best_selected = subset_columns[[best_iteration]]$selected_sites,
+    best_input = subset_columns[[best_iteration]]$input_sites,
+    lowest_mae = mae_results[best_iteration],
+    best_iteration = best_iteration
+  ))
+}
+
+## Process all bootstrap samples (parallelized)
+elastic_results <- mclapply(lasso_processed_samples, function(sample) {
+  run_random_subsets(
+    filtered_sample = sample,
+    num_iterations = 500,  # Adjust as needed
+    num_sites = 650      # Adjust as needed
+  )
+}, mc.cores = detectCores() - 1)
+
+## Process all bootstrap samples (parallelized)
+# elastic_results <- mclapply(correlation_results, function(sample) {
+#   run_random_subsets(
+#     filtered_sample = sample,
+#     num_iterations = 1000,  # Adjust as needed
+#     num_sites = 150      # Adjust as needed
+#   )
+# }, mc.cores = detectCores() - 1)
+
+## To analyze results for first bootstrap sample:
+elastic_output79 <- elastic_results[[100]]
+
+# lowest_mae <- elastic_output1$lowest_mae
+# sites_used <- elastic_output1$best_selected
+# length(sites_used)
+# 
+# elastic_output1$best_model
+
+## saving data 
+# save(elastic_output1, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/Lasso150_bootstrap_1_plot.RData")
+# save(elastic_output11, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/Corr0.5_lasso150by1000_bootstrap_11_plot.RData")
+# save(elastic_output14, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/Corr0.5_lasso150by1000_bootstrap_14_plot.RData")
+# save(elastic_output25, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/Corr0.5_lasso150by1000_bootstrap_25_plot.RData")
+# save(elastic_output27, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/2025_2_Corr0.5alpha0.2_1000by500_bootstrap_27_plot.RData")
+# save(elastic_output68, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-3-2025_3_Corr0.5elastic_120by2000_bootstrap_68_plot.RData")
+# save(elastic_output35, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-3-2025_3_Corr0.5elastic_120by2000_bootstrap_35_plot.RData")
+# save(elastic_output24, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-3-2025_5_Lassox5_lasso_120by1000_bootstrap_24_plot.RData")
+# save(elastic_output25, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-3-2025_5_Lassox5_lasso_120by1000_bootstrap_25_plot.RData")
+# save(elastic_output61, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-3-2025_5_Lassox5_lasso_120by1000_bootstrap_61_plot.RData")
+# save(elastic_output12, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-3-2025_6_Lassox5_lasso_150by1000_bootstrap_12_plot.RData")
+# save(elastic_output14, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-3-2025_6_Lassox5_lasso_150by1000_bootstrap_14_plot.RData")
+# save(elastic_output32, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-3-2025_6_Lassox5_lasso_150by1000_bootstrap_32_plot.RData")
+# save(elastic_output2, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_1_Lassox6_lasso_120by1000_bootstrap_2_plot.RData")
+# save(elastic_output36, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_1_Lassox6_lasso_120by1000_bootstrap_36_plot.RData")
+# save(elastic_output59, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_1_Lassox6_lasso_120by1000_bootstrap_59_plot.RData")
+# save(elastic_output94, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_1_Lassox6_lasso_120by1000_bootstrap_94_plot.RData")
+# save(elastic_output12, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_2_Lassox6_lasso_150by1000_bootstrap_12_plot.RData")
+# save(elastic_output15, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_2_Lassox6_lasso_150by1000_bootstrap_15_plot.RData")
+# save(elastic_output99, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_2_Lassox6_lasso_150by1000_bootstrap_99_plot.RData")
+# save(elastic_output26, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_5_Lassox6_lass120by1000_bootstrap_26_plot.RData")
+# save(elastic_output24, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_5_Lassox6_lass120by1000_bootstrap_24_plot.RData")
+# save(elastic_output45, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_5_Lassox6_lass120by1000_bootstrap_45_plot.RData")
+# save(elastic_output63, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_5_Lassox6_lass120by1000_bootstrap_63_plot.RData")
+# save(elastic_output65, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_5_Lassox6_lass120by1000_bootstrap_65_plot.RData")
+# save(elastic_output88, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_6_Lassox8_lasso120by1000_bootstrap_88_plot.RData")
+# save(elastic_output22, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_7_Lassox8_lasso150by1000_bootstrap_22_plot.RData")
+# save(elastic_output60, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_7_Lassox8_lasso150by1000_bootstrap_60_plot.RData")
+# save(elastic_output79, file = "/work/gmgi/Fisheries/epiage/haddock/modelplots/4-4-2025_7_Lassox8_lasso150by1000_bootstrap_79_plot.RData")
+```
+
+## Create df with each row as iteration and the output of MAE
+
+Find Top 20 models from the iterations above 
+
+```{r}
+# Extract MAE values and their indices
+mae_values <- sapply(elastic_results, function(res) res$lowest_mae)
+sorted_indices <- order(mae_values)  # Sort indices by MAE values
+
+# Select the top 20 results
+top_20_indices <- sorted_indices[1:20]
+top_20_results <- elastic_results[top_20_indices]
+
+# Optional: Create a summary of the top 20 results
+top_20_summary <- data.frame(
+  Index = top_20_indices,
+  Lowest_MAE = mae_values[top_20_indices]
+)
+```
+
+Trying to filter to models with lowest testing MAE and R2
+
+```{r}
+#filtered_sample=lasso_processed_samples[[1]]
+
+run_random_subsets <- function(filtered_sample, num_iterations = 500, num_sites = 650) {
+  # Initialize storage
+  mae_train <- numeric(num_iterations)
+  mae_test <- numeric(num_iterations)
+  r2_train <- numeric(num_iterations)
+  r2_test <- numeric(num_iterations)
+  num_sites_chosen <- numeric(num_iterations)
+  cv_models <- list()
+  subset_columns <- list()
+  
+  # For best model selection
+  best_r2_test <- -Inf
+  best_iteration <- NA
+  
+  # Extract matrices
+  filtered_training_matrix <- filtered_sample$training
+  filtered_testing_matrix <- filtered_sample$testing
+  age_training_vector <- filtered_sample$age_vector
+  #age_testing_vector <- filtered_sample$age_vector_test # Ensure this exists
+  
+  # Validation check
+  if(num_sites > ncol(filtered_training_matrix)) {
+    stop("Requested number of sites exceeds available features in filtered matrix")
+  }
+  
+  for (i in 1:num_iterations) {
+    subset_cols <- sample(ncol(filtered_training_matrix), num_sites)
+    train_subset <- filtered_training_matrix[, subset_cols]
+    test_subset <- filtered_testing_matrix[, subset_cols]
+    
+    cv_model <- cv.glmnet(x = train_subset, 
+                          y = age_training_vector,
+                          alpha = 0.02,
+                          nfolds = 10,
+                          type.measure = "mae",
+                          standardize = FALSE)
+    
+    # Predictions
+    #pred_train <- predict(cv_model, newx = train_subset, s = "lambda.min")
+    #pred_test <- predict(cv_model, newx = test_subset, s = "lambda.min")
+    
+    pred_train <- as.data.frame(predict(cv_model, newx = train_subset, s = "lambda.min")) %>% 
+                  rownames_to_column(var = "GMGI_ID") %>% 
+                  dplyr::rename(epi.age = lambda.min) %>%
+                  left_join(., meta, by = "GMGI_ID") %>%
+                  mutate(epi.age = pmax(epi.age, 0))
+    
+    pred_test <- as.data.frame(predict(cv_model, newx = test_subset, s = "lambda.min")) %>% 
+                 rownames_to_column(var = "GMGI_ID") %>% 
+                 dplyr::rename(epi.age = lambda.min) %>%
+                 left_join(., meta, by = "GMGI_ID") %>%
+                 mutate(epi.age = pmax(epi.age, 0))
+    
+    # Metrics
+    mae_train[i] <- mean(abs(pred_train$epi.age - pred_train$AgeRounded))
+    mae_test[i] <- mean(abs(pred_test$epi.age - pred_test$AgeRounded))
+    
+    r2_train[i] <- 1 - (sum((pred_train$AgeRounded - pred_train$epi.age)^2) / 
+                        sum((pred_train$AgeRounded - mean(pred_train$AgeRounded))^2))
+    
+    r2_test[i] <- 1 - (sum((pred_test$AgeRounded - pred_test$epi.age)^2) / 
+                        sum((pred_test$AgeRounded - mean(pred_test$AgeRounded))^2))
+    
+    # Non-zero coefficients at optimal lambda
+    coef_list <- coef(cv_model, s = "lambda.min")
+    non_zero_indices <- which(coef_list != 0)[-1] # Exclude intercept
+    selected_sites <- subset_cols[non_zero_indices]
+    num_sites_chosen[i] <- length(selected_sites)
+    
+    # Store model and sites
+    cv_models[[i]] <- cv_model
+    subset_columns[[i]] <- list(
+      input_sites = subset_cols,
+      selected_sites = selected_sites
+    )
+    
+    # Track best model by R2_test
+    if (r2_test[i] > best_r2_test ||
+        (r2_test[i] == best_r2_test && mae_test[i] < mae_test[best_iteration])) {
+      best_r2_test <- r2_test[i]
+      best_iteration <- i
+    }
+  }
+  
+  # Output structure (same as before, but now best model is by R2_test)
+  return(list(
+    all_mae_train = mae_train,
+    all_mae_test = mae_test,
+    all_r2_train = r2_train,
+    all_r2_test = r2_test,
+    all_sites_chosen = num_sites_chosen,
+    all_models = cv_models,
+    all_subsets = subset_columns,
+    
+    best_model = cv_models[[best_iteration]],
+    best_selected = subset_columns[[best_iteration]]$selected_sites,
+    best_input = subset_columns[[best_iteration]]$input_sites,
+    best_r2_test = r2_test[best_iteration],
+    best_mae_test = mae_test[best_iteration],
+    best_iteration = best_iteration
+  ))
+}
+
+
+## Process all bootstrap samples (parallelized)
+elastic_results <- mclapply(lasso_processed_samples, function(sample) {
+  run_random_subsets(
+    filtered_sample = sample,
+    num_iterations = 500,  # Adjust as needed
+    num_sites = 650      # Adjust as needed
+  )
+}, mc.cores = detectCores() - 1)
+
+```
+
+
+Plot the models
+
+```{r}
+## Loop to process each best model in elastic_results
+all_predictions <- list()  # Initialize list to store predictions for each bootstrap sample
+
+for (i in seq_along(elastic_results)) {
+  # Extract best model and subset from current bootstrap sample
+  best_model <- elastic_results[[i]]$best_model
+  best_subset <- elastic_results[[i]]$best_input
+  
+  # Extract filtered matrices
+  filtered_training_matrix <- lasso_processed_samples[[i]]$training
+  filtered_testing_matrix <- lasso_processed_samples[[i]]$testing
+  
+  # Subset matrices based on best subset
+  best_training_subset <- filtered_training_matrix[, best_subset]
+  best_testing_subset <- filtered_testing_matrix[, best_subset]
+  
+  ## Training models
+  predicted_age <- as.data.frame(predict(best_model, newx = best_training_subset, s = "lambda.min")) %>% 
+    rownames_to_column(var = "GMGI_ID") %>% 
+    dplyr::rename(epi.age = lambda.min)
+  
+  predicted_age_testing <- as.data.frame(predict(best_model, newx = best_testing_subset, s = "lambda.min")) %>% 
+    rownames_to_column(var = "GMGI_ID") %>% 
+    dplyr::rename(epi.age = lambda.min)
+
+  ## Train and testing group labels
+  predicted_age$group <- "training"
+  predicted_age_testing$group <- "testing"
+  
+  predictions <- full_join(predicted_age, predicted_age_testing, by = join_by(GMGI_ID, epi.age, group)) %>%
+    left_join(., meta, by = "GMGI_ID") %>%
+    mutate(epi.age = pmax(epi.age, 0))
+  
+  ## Store predictions in the list for later use
+  all_predictions[[i]] <- predictions
+  
+  ## Visualization (optional: save plots for each iteration)
+  plot <- predictions %>%
+    ggplot(aes(x = AgeRounded, y = epi.age)) + 
+    theme_classic() + 
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey70") +
+    geom_smooth(method = 'lm', se = FALSE, color = "grey", alpha = 0.8) +
+    geom_point(aes(fill = group), size = 3, alpha = 0.8, color = "black", shape = 21) + 
+    scale_fill_manual(values = c("#588157", "grey90")) +
+    xlim(0,12) + ylim(0,12) +
+    labs(fill = "Set",
+         y = "Epigenetic Age",
+         x = "Otolith Age") +
+    theme(
+      legend.position="right",
+      legend.title = element_text(face="bold", size=18),
+      legend.text = element_text(size=16),
+      strip.text = element_text(face="bold", size=16),
+      axis.title.y = element_text(margin=margin(t=0,r=15,b=0,l=0),size=20,face="bold"),
+      axis.title.x = element_text(margin=margin(t=10,r=0,b=0,l=0),size=20,face="bold"),
+      axis.text.x=element_text(color="black",size=16),
+      axis.text.y=element_text(color="black",size=16),
+      plot.caption=element_text(hjust=0.75,size=16,face="italic")
+    ) +
+    stat_regline_equation(label.x=0.2,label.y=11,size=6,aes(label=after_stat(rr.label))) +
+    
+    annotate(geom="label",x=0,y=10,label=paste0("# Sites: ",length(elastic_results[[i]]$best_selected)),
+             hjust=0,vjust=1,label.size=NA,color="black",size=6,fill=NA) +
+    
+    annotate(geom="label",x=0,y=8.5,label=paste0("MAE: ",round(elastic_results[[i]]$best_mae_test,2)), #lowest_mae
+             hjust=0,vjust=1,label.size=NA,color="black",size=6,fill=NA)
+  
+  ## Save plot (optional)
+  ggsave(filename=paste0("/work/gmgi/Fisheries/epiage/haddock/modelplots/5-8-2025_1_Lassox5_alpha0.02x650x500/5-8-2025_1_Lassox5_alpha0.02x650x500_bootstrap_",
+                         i, "_plot.png"), plot=plot, width=7, height=5.5)
+}
+
+```
+
+
+Saving output 
+
+```{r}
+for (i in 1:100) {
+  # Extract the ith sample
+  sample_obj <- lasso_processed_samples[[i]]
+  
+  # Create a filename with the current index
+  save_filename <- paste0("/work/gmgi/Fisheries/epiage/haddock/modelplots/5-8-2025_1_Lassox5_alpha0.02x650x500/5-8-2025_1_lasso_processed_sample_", i, ".RData")
+  
+  # Save the object
+  save(sample_obj, file = save_filename)
+}
+
+## To analyze results for first bootstrap sample:
+for (i in 1:100) {
+  # Extract the ith sample
+  sample_obj_elastic <- elastic_results[[i]]
+  
+  # Create a filename with the current index
+  save_filename_elastic <- paste0("/work/gmgi/Fisheries/epiage/haddock/modelplots/5-8-2025_1_Lassox5_alpha0.02x650x500/5-8-2025_1_elastic_results_", i, ".RData")
+  
+  # Save the object
+  save(sample_obj_elastic, file = save_filename_elastic)
+}
+```
+
+
+#### Adding a section for testing and MAE based on testing
+
+```{r}
+# ## Define function to perform random subset analysis on processed samples
+# run_random_subsets <- function(filtered_sample, num_iterations = 500, num_sites = 150) {
+#   # Initialize storage
+#   train_mae_results <- numeric(num_iterations)
+#   test_mae_results  <- numeric(num_iterations)
+#   num_sites_chosen  <- numeric(num_iterations)
+#   cv_models         <- list()
+#   subset_columns    <- list()
+#   
+#   # Extract matrices from processed sample
+#   filtered_training_matrix <- filtered_sample$training
+#   age_training_vector      <- filtered_sample$age_vector
+#   filtered_testing_matrix  <- filtered_sample$testing   # Add this to your sample list
+#   age_testing_vector       <- filtered_sample$age_vector_testing  # Add this to your sample list
+#   
+#   # Validation check
+#   if(num_sites > ncol(filtered_training_matrix)) {
+#     stop("Requested number of sites exceeds available features in filtered matrix")
+#   }
+#   
+#   for (i in 1:num_iterations) {
+#     subset_cols   <- sample(ncol(filtered_training_matrix), num_sites)
+#     subset_matrix <- filtered_training_matrix[, subset_cols]
+#     subset_matrix_test <- filtered_testing_matrix[, subset_cols]
+#     
+#     cv_model <- cv.glmnet(
+#       x = subset_matrix, 
+#       y = age_training_vector, 
+#       alpha = 0.1, 
+#       nfolds = 10,
+#       type.measure = "mae",
+#       family = "gaussian",
+#       standardize = FALSE
+#     )
+#     
+#     # Store training MAE
+#     current_train_mae <- min(cv_model$cvm)
+#     train_mae_results[i] <- current_train_mae
+#     
+#     # Predict on test set using the best lambda
+#     pred_test <- predict(cv_model, newx = subset_matrix_test, s = "lambda.min")
+#     current_test_mae <- mean(abs(pred_test - age_testing_vector))
+#     test_mae_results[i] <- current_test_mae
+#     
+#     # Extract non-zero coefficients at optimal lambda
+#     coef_list <- coef(cv_model, s = "lambda.min")
+#     non_zero_indices <- which(coef_list != 0)[-1] # Exclude intercept (first coefficient)
+#     selected_sites <- subset_cols[non_zero_indices]
+#     num_sites_chosen[i] <- length(selected_sites)
+#     
+#     # Store both input and selected sites
+#     cv_models[[i]] <- cv_model
+#     subset_columns[[i]] <- list(
+#       input_sites = subset_cols,
+#       selected_sites = selected_sites
+#     )
+#   }
+#   
+#    # After identifying the best model
+#   best_iteration <- which.min(test_mae_results)
+#   best_model     <- cv_models[[best_iteration]]
+#   best_input     <- subset_columns[[best_iteration]]$input_sites
+#   best_selected  <- subset_columns[[best_iteration]]$selected_sites
+#   
+#   # Subset matrices for best model
+#   best_training_subset <- filtered_training_matrix[, best_input, drop=FALSE]
+#   best_testing_subset  <- filtered_testing_matrix[, best_input, drop=FALSE]
+#   
+#   # Predict on training and testing sets
+#   predicted_age <- as.data.frame(
+#     predict(best_model, newx = best_training_subset, s = "lambda.min")
+#   ) %>%
+#     tibble::rownames_to_column(var = "GMGI_ID") %>%
+#     dplyr::rename(epi.age = lambda.min)
+#   
+#   predicted_age_testing <- as.data.frame(
+#     predict(best_model, newx = best_testing_subset, s = "lambda.min")
+#   ) %>%
+#     tibble::rownames_to_column(var = "GMGI_ID") %>%
+#     dplyr::rename(epi.age = lambda.min)
+#   
+#   predicted_age$group <- "training"
+#   predicted_age_testing$group <- "testing"
+#   
+#   # Combine predictions and merge with meta
+#   predictions <- dplyr::bind_rows(predicted_age, predicted_age_testing) %>%
+#     dplyr::left_join(meta, by = "GMGI_ID") %>%
+#     dplyr::mutate(epi.age = pmax(epi.age, 0))
+#   
+#   # Plot
+#   plot <- predictions %>%
+#     ggplot(aes(x = AgeRounded, y = epi.age)) + 
+#     theme_classic() + 
+#     geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey70") +
+#     geom_smooth(method = 'lm', se = FALSE, color = "grey", alpha = 0.8) +
+#     geom_point(aes(fill = group), size = 3, alpha = 0.8, color = "black", shape = 21) + 
+#     scale_fill_manual(values = c("#588157", "grey90")) +
+#     xlim(0,12) + ylim(0,12) +
+#     labs(fill = "Set",
+#                   y = "Epigenetic Age",
+#                   x = "Otolith Age") +
+#     theme(
+#       legend.position="right",
+#       legend.title = element_text(face="bold", size=18),
+#       legend.text = element_text(size=16),
+#       strip.text = element_text(face="bold", size=16),
+#       axis.title.y = element_text(margin=margin(t=0,r=15,b=0,l=0),size=20,face="bold"),
+#       axis.title.x = element_text(margin=margin(t=10,r=0,b=0,l=0),size=20,face="bold"),
+#       axis.text.x=element_text(color="black",size=16),
+#       axis.text.y=element_text(color="black",size=16),
+#       plot.caption=element_text(hjust=0.75,size=16,face="italic")
+#     ) +
+#     ggpubr::stat_regline_equation(label.x=0.2,label.y=11,size=6,aes(label=after_stat(rr.label))) +
+#     annotate(geom="label",x=0,y=10,label=paste0("# Sites: ",length(best_selected)),
+#                       hjust=0,vjust=1,label.size=NA,color="black",size=6,fill=NA) +
+#     annotate(geom="label",x=0,y=8.5,label=paste0("Test MAE: ",round(test_mae_results[best_iteration],2)),
+#                       hjust=0,vjust=1,label.size=NA,color="black",size=6,fill=NA)
+#   
+#   # Save plot
+#   plot_file <- file.path(output_dir, paste0("bootstrap_", i, "_plot.png"))
+#   ggsave(filename = plot_file, plot = plot, width = 7, height = 5.5)
+#   
+#   # Return results (optionally include plot object)
+#   return(list(
+#     all_train_mae = train_mae_results,
+#     all_test_mae = test_mae_results,
+#     all_sites_chosen = num_sites_chosen,
+#     all_models = cv_models,
+#     all_subsets = subset_columns,
+#     best_model = best_model,
+#     best_selected = best_selected,
+#     best_input = best_input,
+#     lowest_test_mae = test_mae_results[best_iteration],
+#     best_iteration = best_iteration,
+#     predictions = predictions,
+#     plot_file = plot_file
+#   ))
+# }
+# 
+# output_dir <- "/work/gmgi/Fisheries/epiage/haddock/modelplots/5-2-2025_3_testMAE_Lassox7_lasso150by500"
+# dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+# 
+# elastic_results <- mclapply(seq_along(lasso_processed_samples), function(i) {
+#   run_random_subsets(
+#     filtered_sample = lasso_processed_samples[[i]],
+#     meta = meta,                  # your metadata table
+#     output_dir = output_dir,
+#     i = i,
+#     num_iterations = 500,
+#     num_sites = 150
+#   )
+# }, mc.cores = detectCores() - 1)
+
+```
+
+
+
+
+
+
+
+

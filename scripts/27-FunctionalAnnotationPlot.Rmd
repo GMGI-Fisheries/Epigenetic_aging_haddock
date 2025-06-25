@@ -1,0 +1,297 @@
+---
+title: "Plotting genomic functional annotation for Haddock Epigenetic Aging Project"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+Load libraries
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(readxl) ## read excel file 
+library(writexl) ## write excel file 
+library(ggpubr)
+library(ComplexHeatmap)
+library(matrixStats) # for row normalization
+library(circlize)
+library(pheatmap)
+library(gplots)
+library(RColorBrewer)
+```
+
+Load data 
+
+```{r}
+functional_clock <- read.csv("data/functional_clock.csv") %>% dplyr::select(-X)
+length(unique(functional_clock$Loc)) ##81
+
+functional_100p <- read.csv("data/functional_100p.csv") %>% dplyr::select(-X)
+length(unique(functional_100p$Loc))
+```
+
+```{r}
+# 1. Read data
+clock_data <- read.csv("data/clock_data.csv") %>% dplyr::select(-X)
+full100_data <- read.csv("data/full100p_data.csv") %>% dplyr::select(-X)
+
+# 2. Prepare clock_matrix (rows: Loc, columns: GMGI_ID)
+clock_matrix <- clock_data %>% 
+  spread(GMGI_ID, percent.meth) %>%
+  column_to_rownames(var = "Loc")
+clock_matrix <- as.matrix(clock_matrix)
+clock_matrix <- clock_matrix[, sample_order]
+
+# 3. Prepare full100_matrix (not used here, but you have it)
+full100_matrix <- full100_data %>%
+  dplyr::select(Loc, sample, percent.meth) %>%
+  spread(sample, percent.meth) %>%
+  column_to_rownames(var = "Loc")
+full100_matrix <- as.matrix(full100_matrix)
+
+# 4. Read in prediction data for the Ages of individuals used
+best_clock <- read.csv("data/04_age_prediction/predictions.csv") %>% dplyr::select(GMGI_ID, AgeRounded) %>% arrange(AgeRounded)
+sample_order <- best_clock$GMGI_ID
+age_order <- best_clock$AgeRounded
+
+# 5. Order the matrices by the Age
+clock_matrix <- clock_matrix[, sample_order]
+full100_matrix <- full100_matrix[, sample_order]
+```
+
+Heatmap for clock loci
+
+```{r}
+# Z-score by row (locus-wise)
+clock_matrix_z <- t(scale(t(clock_matrix)))
+clock_matrix_z <- clock_matrix_z[, sample_order]
+
+# Now plot the heatmap using your parameters
+age_annot <- best_clock$AgeRounded[match(colnames(clock_matrix_z), best_clock$GMGI_ID)]
+
+# 2. Create top annotation
+hm_ann_col <- HeatmapAnnotation(
+  Age = age_annot,
+  col = list(Age = colorRamp2(range(age_annot, na.rm = TRUE), c("#d8f3dc", "#3a5a40"))),
+  annotation_name_side = "left"
+)
+
+z_col_fun <- colorRamp2(c(-2, 0, 2), c("white", "white", "#013a63"))
+
+pdf("manuscript figures/Figure4_heatmapv2.pdf")
+ht <- 
+  Heatmap(
+  clock_matrix_z,
+  column_title = "",
+  name = "z-score",
+  show_row_names = FALSE,
+  top_annotation = hm_ann_col,
+  show_column_names = FALSE,
+  cluster_columns = FALSE,
+  row_dend_side = "left",
+  column_dend_height = unit(0.5, "in"),
+  km = 2,
+  col = z_col_fun,
+  row_km_repeats = 100,
+  row_gap = unit(2.5, "mm"),
+  row_title = c("Cluster1", "Cluster2"),
+  border = TRUE,
+  column_names_gp = gpar(fontsize = 8),
+  # Adjust these to control cell size:
+  width = unit(8, "cm"),   # Narrower width = smaller column boxes
+  height = unit(8, "cm")  # Shorter height = smaller row boxes
+)
+ht_drawn <- draw(ht)
+dev.off()
+
+
+
+############
+```
+
+
+Heatmap for clock loci
+
+```{r}
+# Z-score by row (locus-wise)
+full100_matrix_z <- t(scale(t(full100_matrix)))
+full100_matrix_z <- full100_matrix_z[, sample_order]
+
+# Now plot the heatmap using your parameters
+age_annot_full <- best_clock$AgeRounded[match(colnames(full100_matrix_z), best_clock$GMGI_ID)]
+
+# 2. Create top annotation
+hm_ann_col_full <- HeatmapAnnotation(
+  Age = age_annot_full,
+  col = list(Age = colorRamp2(range(age_annot, na.rm = TRUE), c("#d8f3dc", "#3a5a40"))),
+  annotation_name_side = "left"
+)
+
+z_col_fun <- colorRamp2(c(-2, 0, 2), c("white", "white", "#013a63"))
+
+pdf("manuscript figures/Figure4_heatmap_fullv2.pdf")
+ht_full <- 
+  Heatmap(
+  full100_matrix_z,
+  column_title = "",
+  name = "z-score",
+  show_row_names = FALSE,
+  top_annotation = hm_ann_col,
+  show_column_names = FALSE,
+  cluster_columns = FALSE,
+  row_dend_side = "left",
+  row_dend_width = unit(2, "mm"),
+  column_dend_height = unit(0.5, "in"),
+  km = 2,
+  col = z_col_fun,
+  row_km_repeats = 100,
+  row_gap = unit(2.5, "mm"),
+  row_title = c("Cluster1", "Cluster2"),
+  border = TRUE,
+  column_names_gp = gpar(fontsize = 8),
+  # Adjust these to control cell size:
+  width = unit(8, "cm"),   # Narrower width = smaller column boxes
+  height = unit(8, "cm")  # Shorter height = smaller row boxes
+)
+ht_full_drawn <- draw(ht_full)
+dev.off()
+
+
+
+############
+```
+
+Trying another heatmap package 
+
+```{r}
+# # age_levels <- sort(unique(best_clock$AgeRounded))
+# # age_levels_chr <- as.character(age_levels)
+# # 
+# # nb.cols <- length(age_levels_chr)
+# # age_colors <- colorRampPalette(brewer.pal(8, "Set2"))(nb.cols)
+# # names(age_colors) <- age_levels_chr
+# # col_side_colors <- age_colors[as.character(best_clock$AgeRounded)]
+# 
+# # gradient_fn <- colorRampPalette(c("#0077b6", "#caf0f8"))
+# gradient_fn <- colorRampPalette(c("#d8f3dc", "#3a5a40"))
+# age_values <- best_clock$AgeRounded
+# # Rank or rescale ages to get color indices
+# age_ranks <- rank(age_values, ties.method = "first")
+# col_side_colors <- gradient_fn(length(age_values))[age_ranks]
+# 
+# # Compute distance and clustering as before
+# row_dist <- as.dist(1 - cor(t(clock_matrix), use = "pa"))
+# row_hclust <- hclust(row_dist, method = "average")
+# row_dend <- as.dendrogram(row_hclust)  # Do NOT use color_branches()
+# 
+# # Find cluster break for rowsep (as before)
+# row_clusters <- cutree(row_hclust, k = 2)
+# row_order <- order.dendrogram(row_dend)
+# cluster_assignments <- row_clusters[row_order]
+# cluster_change <- which(diff(cluster_assignments) != 0)
+# 
+# 
+# ## Heatmap
+# #pdf("manuscript figures/Figure4_heatmap.pdf")
+# heatmap.2(clock_matrix,
+#   cexCol = 1.5, 
+#   distfun = function(x) as.dist(1 - cor(t(x), use = "pa")), 
+#   hclustfun = function(x) hclust(x, method = 'average'),
+#   key.xtickfun = function() {
+#     breaks = pretty(parent.frame()$breaks)
+#     breaks = breaks[c(1, length(breaks))]
+#     list(at = parent.frame()$scale01(breaks), labels = breaks)
+#   },
+#   Colv = FALSE, 
+#   col = rev(RColorBrewer::brewer.pal(name = "RdBu", n = 10)), #RdYlBu
+#   density.info = "none", 
+#   dendrogram = "row",
+#   trace = "none", 
+#   scale = "row", 
+#   labRow = FALSE,
+#   labCol = FALSE,
+#   ColSideColors = col_side_colors,   
+#   sepcolor = "black",
+#   sepwidth = c(0.1, 0.01),
+#   #Rowv = row_dend,
+#   #rowsep = cluster_change,
+# )
+# #dev.off()
+```
+
+
+Cluster Loci to then map function 
+
+```{r}
+# Get the row indices for each cluster
+cluster1_rows <- row_order(ht_drawn)[[1]]
+cluster2_rows <- row_order(ht_drawn)[[2]]
+
+# Get the row names (assuming rownames(clock_matrix_z) are your feature names)
+cluster1_names <- as.data.frame(rownames(clock_matrix_z)[cluster1_rows]) %>% rename(Loc=1) %>% mutate(cluster="1") ## 66 loci
+cluster2_names <- as.data.frame(rownames(clock_matrix_z)[cluster2_rows]) %>% rename(Loc=1) %>% mutate(cluster="2") ## 45 loci
+
+names_total <- bind_rows(cluster1_names, cluster2_names)
+
+## Cluster df 
+cluster_information <- functional_clock %>% full_join(., names_total, by = "Loc")
+
+cluster_information %>% group_by(cluster, Note) %>% summarise(count = n_distinct(Loc)) %>% write_xlsx("data/functional_notes.xlsx")
+
+### Export gene list 
+cluster_information %>% dplyr::select(Name, cluster) %>%
+  mutate(Name = gsub("Name=", "", Name)) %>% write.csv("data/cluster_genelist.csv", row.names = FALSE)
+```
+
+
+Cluster Loci to then map function for full set
+
+```{r}
+# Get the row indices for each cluster
+cluster1_full_rows <- row_order(ht_full_drawn)[[1]]
+cluster2_full_rows <- row_order(ht_full_drawn)[[2]]
+
+# Get the row names (assuming rownames(clock_matrix_z) are your feature names)
+cluster1_full_names <- as.data.frame(rownames(full100_matrix_z)[cluster1_full_rows]) %>% 
+  rename(Loc=1) %>% mutate(cluster="1") ## 3,554 loci
+
+cluster2_full_names <- as.data.frame(rownames(full100_matrix_z)[cluster2_full_rows]) %>% 
+  rename(Loc=1) %>% mutate(cluster="2") ## 4,177 loci
+
+names_full_total <- bind_rows(cluster1_full_names, cluster2_full_names)
+
+## Cluster df 
+cluster_full_information <- functional_100p %>% full_join(., names_full_total, by = "Loc")
+
+cluster_full_information %>% group_by(cluster, Note) %>% summarise(count = n_distinct(Loc))# %>% #write_xlsx("data/functional_notes.xlsx")
+
+### Export gene list 
+cluster_full_information %>% dplyr::select(Name, cluster) %>%
+  mutate(Name = gsub("Name=", "", Name)) %>% write.csv("data/06_genomic_function/cluster_full_genelist.csv", row.names = FALSE)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

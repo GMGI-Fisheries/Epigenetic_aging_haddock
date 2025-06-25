@@ -1,0 +1,276 @@
+---
+title: "Finding genomic function of significant loci"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+*Done on server RStudio*  
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+
+library(GenomicRanges)
+library(IRanges)
+library(GenomicFeatures)
+library(txdbmaker)
+library(Biostrings)
+library(strex)
+```
+
+Load data 
+
+```{r}
+load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final.RData")
+head(df100_f4_agelength_final)
+length(unique(df100_f4_agelength_final$scaffold)) ## age related loci appear in 2,177 scaffolds out of ~8,420 
+
+#### 100% set 7731
+df100_f4_agelength_final <- df100_f4_agelength_final %>%
+  mutate(position = start+1,
+         scaffold = str_after_nth(scaffold, "\\|", 2)) %>%
+  relocate(position, .before=start) %>%
+  mutate(start = as.numeric(start),
+         stop = as.numeric(stop))
+
+df100_f4_agelength_final %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/full100p_data.csv")
+
+# ### 90% set
+# load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
+# df_f4_agelength_imputed <- results1 %>% rownames_to_column(var = "Loc") %>%
+#   gather("GMGI_ID", "percent.meth", 2:last_col()) %>%
+#   separate(Loc, c("scaffold", "position"), sep = " ", remove=FALSE) %>%
+#   mutate(position = as.numeric(position),
+#           start = position-1,
+#           stop = position+1,
+#           scaffold = str_after_nth(scaffold, "\\|", 2))
+
+### Final clock 111
+clock_sites <- read_csv("/work/gmgi/Fisheries/epiage/haddock/clock_sites.csv") 
+clock_sites$Loc <- sub("^(([^_]*_){2}[^_]*)_", "\\1 ", clock_sites$Loc)
+clock_sites$Loc <- gsub("_", "|", clock_sites$Loc)
+
+# clock_data <- df_f4_agelength_imputed %>% filter(Loc %in% clock_sites$Loc)
+# clock_data %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/clock_data.csv")
+
+
+
+
+# ### gene overlap from genomic location 
+# geneoverlap_clock <- read.csv("/work/gmgi/Fisheries/epiage/haddock/geneoverlap_clock.csv") %>% dplyr::select(-X)  %>%
+#   separate(Loc, c("scaffold", "position"), sep = " ", remove=FALSE) %>%
+#   mutate(position = as.numeric(position),
+#          scaffold = str_after_nth(scaffold, "\\|", 2))
+# length(unique(geneoverlap_clock$Loc))
+# 
+# geneoverlap_100p <- read.csv("/work/gmgi/Fisheries/epiage/haddock/geneoverlap_100p.csv") %>% dplyr::select(-X) %>%
+#   separate(Loc, c("scaffold", "position"), sep = " ", remove=FALSE) %>%
+#   mutate(position = as.numeric(position),
+#          scaffold = str_after_nth(scaffold, "\\|", 2))
+# length(unique(geneoverlap_100p$Loc))
+```
+
+Load gff information 
+
+```{r}
+gff <- read.delim2("/work/gmgi/Fisheries/reference_genomes/Haddock/melAeg_maker.putative_function.domain_added.gff", header=F, skip=1) %>%
+  arrange(V1)
+
+# gff_aed <- read.delim2("/work/gmgi/Fisheries/reference_genomes/Haddock/melAeg_maker.putative_function.domain_added.aed_0.5.gff", 
+#                        header=F, skip=1) %>% arrange(V1)
+# head(gff_aed)
+
+## filtering out columns we don't need
+gff_edited <- gff %>%
+  subset(!V1=="###") %>%
+  filter(!is.na(V4))
+
+## assigning the genome scaffold name to the gtf scaffold name
+gff_scaffolds <- gff_edited %>% subset(V3=="contig") %>% 
+  dplyr::select(V1, Sequence.Length=V5) %>% distinct() %>%
+  arrange(desc(Sequence.Length)) %>%
+  mutate(scaffold = paste0("OLKM0100", sprintf("%04d", row_number()), ".1"))
+  
+## joining the genome scaffold name onto the gtf file
+gff_edited <- gff_edited %>% left_join(., gff_scaffolds %>% dplyr::select(-Sequence.Length), by = "V1") %>%
+  relocate(scaffold, .after=V1)
+
+unique(gff_edited$V3)
+
+gff_edited <- gff_edited %>% dplyr::rename(gff_scaffold=V1, feature_type=V3, start=V4, end=V5) %>%
+  mutate(start = as.numeric(start),
+         end = as.numeric(end))
+
+gff_generegions <- gff_edited %>% filter(!grepl("match|contig", feature_type))
+
+# Annotation_information <- gff_edited %>% subset(feature_type == "gene") %>%
+#   separate(V9, c("ID", "Name", "Alias", "Note"), sep = ";") %>%
+#   mutate(Note = gsub("Note=", "", Note)) %>%
+#   dplyr::select(scaffold, start, end, gene=Name, Function=Note)
+```
+
+Clock df
+
+```{r}
+clock_df <- clock_sites %>% separate(Loc, c("scaffold", "position"), sep = " ", remove=FALSE) %>%
+  mutate(position = as.numeric(position),
+         start = position-1,
+         end=position+1,
+         scaffold = str_after_nth(scaffold, "\\|", 2))
+```
+
+
+Gene metadata information: clock and 100% set 
+
+```{r}
+##### Gene regions only 
+#######################
+# Create GRanges objects
+clock_genic_gr <- GRanges(
+  seqnames = clock_df$scaffold,
+  ranges = IRanges(start = clock_df$position, width = 1)
+)
+
+# Create GRanges objects
+genic_100p_gr <- GRanges(
+  seqnames = df100_f4_agelength_final$scaffold,
+  ranges = IRanges(start = df100_f4_agelength_final$position, width = 1)
+)
+
+################
+
+# Create GRanges for gene regions from GFF
+gff_gr <- GRanges(
+  seqnames = gff_edited$scaffold,
+  ranges = IRanges(start = gff_edited$start, end = gff_edited$end)
+)
+
+##################
+### CLOCK
+# Find overlaps between methylation positions and gene bodies
+clock_genic_overlaps <- findOverlaps(
+  clock_genic_gr,
+  gff_gr,
+  type = "within"  # Use "any" if you want any overlap (not fully contained)
+)
+
+clock_genic_overlaps_df <- data.frame(
+  clock_df[queryHits(clock_genic_overlaps), ],  # Methylation info
+  gff_edited[subjectHits(clock_genic_overlaps), ])  # Gene info
+
+length(unique(clock_genic_overlaps_df$Loc)) ## 111  
+
+### FULL 100% SET
+# Find overlaps between methylation positions and gene bodies
+genic_100p_overlaps <- findOverlaps(
+  genic_100p_gr,
+  gff_gr,
+  type = "within"  # Use "any" if you want any overlap (not fully contained)
+)
+
+genic_100p_overlaps_df <- data.frame(
+  df100_f4_agelength_final[queryHits(genic_100p_overlaps), ],  # Methylation info
+  gff_edited[subjectHits(genic_100p_overlaps), ])  # Gene info
+
+length(unique(genic_100p_overlaps_df$Loc)) ## 3535  
+
+```
+
+
+```{r}
+## annotation information I could find 
+# clock_genic_overlaps_df %>% dplyr::select(-V2, -V6, -V7, -V8) %>% 
+#   filter(grepl("Note=", V9)) %>%
+#   filter(!grepl("mRNA", feature_type.1)) %>%
+#   separate(V9, c("ID", "Name", "Alias", "Note"), sep = ";") %>%
+#   write.csv("/work/gmgi/Fisheries/epiage/haddock/functional_clock.csv")
+# 
+# genic_100p_overlaps_df %>% dplyr::select(-V2, -V6, -V7, -V8) %>% 
+#   filter(grepl("Note=", V9)) %>%
+#   filter(!grepl("mRNA", feature_type.1)) %>%
+#   separate(V9, c("ID", "Name", "Alias", "Note"), sep = ";") %>%
+#   write.csv("/work/gmgi/Fisheries/epiage/haddock/functional_100p.csv")
+```
+
+
+```{r}
+clock_functionalanno <- clock_genic_overlaps_df %>% filter(!grepl("match|contig|mRNA", feature_type)) %>% filter(grepl("gene", feature_type)) %>%
+  separate(V9, c("ID", "Name", "Alias", "Note"), sep = ";") %>%
+  mutate(Note = gsub("Note=", "", Note))
+  
+length(unique(clock_functionalanno$Loc)) ## 81 
+
+clock_functionalanno %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/functional_clock.csv")
+```
+
+### Protein sequences 
+
+```{r}
+genes100p <- genic_100p_overlaps_df %>% filter(grepl("gene", feature_type)) %>% 
+  separate(V9, c("ID", "Name", "Alias", "Note"), sep = ";") %>%
+  mutate(Note = gsub("Note=", "", Note)) 
+
+genes100p_genes <- genes100p %>% dplyr::select(Name) %>% mutate(Name = gsub("Name=", "", Name)) %>% distinct()
+
+genes100p_ids <- genes100p_genes$Name
+
+genes100p %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/functional_100p.csv")
+```
+
+
+```{r}
+#Read the protein FASTA into R
+fasta_file <- "/work/gmgi/Fisheries/reference_genomes/Haddock/melAeg_maker.putative_function.aed_0.5.proteins.fasta"
+protein_sequences <- readAAStringSet(fasta_file)
+names(protein_sequences) <- sub("-.*", "", names(protein_sequences))
+
+#### Cluster 1 genes (88)
+cluster1_genes <- read.csv("/work/gmgi/Fisheries/epiage/haddock/cluster_genelist.csv") %>% subset(cluster=="1")
+#### Cluster 2 genes (54)
+cluster2_genes <- read.csv("/work/gmgi/Fisheries/epiage/haddock/cluster_genelist.csv") %>% subset(cluster=="2")
+
+Cluster1_ids <- cluster1_genes$Name
+Cluster2_ids <- cluster2_genes$Name
+
+Cluster1_matched_sequences <- protein_sequences[names(protein_sequences) %in% Cluster1_ids] ## 34 / 88
+Cluster2_matched_sequences <- protein_sequences[names(protein_sequences) %in% Cluster2_ids] ## 22 / 54
+
+writeXStringSet(Cluster1_matched_sequences, "/work/gmgi/Fisheries/epiage/haddock/Cluster1_matched_sequences_proteinFASTA.fasta")
+writeXStringSet(Cluster2_matched_sequences, "/work/gmgi/Fisheries/epiage/haddock/Cluster2_matched_sequences_proteinFASTA.fasta")
+```
+
+
+```{r}
+genes100p_matched_sequences <- protein_sequences[names(protein_sequences) %in% genes100p_ids] ## 864 / 1712
+writeXStringSet(genes100p_matched_sequences, "/work/gmgi/Fisheries/epiage/haddock/Genes100p_matched_sequences_proteinFASTA.fasta")
+
+## cluster full
+cluster1_full_genes <- read.csv("/work/gmgi/Fisheries/epiage/haddock/cluster_full_genelist.csv") %>% subset(cluster=="1")
+cluster2_full_genes <- read.csv("/work/gmgi/Fisheries/epiage/haddock/cluster_full_genelist.csv") %>% subset(cluster=="2")
+
+cluster1_full_genes_ids <- cluster1_full_genes$Name
+cluster2_full_genes_ids <- cluster2_full_genes$Name
+
+Cluster1_full_matched_sequences <- protein_sequences[names(protein_sequences) %in% cluster1_full_genes_ids] ## 489
+Cluster2_full_matched_sequences <- protein_sequences[names(protein_sequences) %in% cluster2_full_genes_ids] ## 559 
+
+writeXStringSet(Cluster1_full_matched_sequences, "/work/gmgi/Fisheries/epiage/haddock/Cluster1_full_matched_sequences_proteinFASTA.fasta")
+writeXStringSet(Cluster2_full_matched_sequences, "/work/gmgi/Fisheries/epiage/haddock/Cluster2_full_matched_sequences_proteinFASTA.fasta")
+```
+
+
+
+
+
+
+
+

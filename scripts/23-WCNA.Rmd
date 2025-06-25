@@ -1,0 +1,464 @@
+---
+title: "Weight Correlation Network Analysis on CpG methylation levels"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+*Done on server RStudio*  
+
+## Set-up  
+
+Load libraries 
+
+```{r}
+if ("DESeq2" %in% rownames(installed.packages()) == 'FALSE') BiocManager::install('DESeq2') 
+#BiocManager::install(c("impute", "preprocessCore", "GO.db"))
+if ("WGCNA" %in% rownames(installed.packages()) == 'FALSE') install.packages('WGCNA') 
+if ("flashClust" %in% rownames(installed.packages()) == 'FALSE') install.packages('flashClust') 
+if ("dendsort" %in% rownames(installed.packages()) == 'FALSE') install.packages('dendsort') 
+if ("ComplexHeatmap" %in% rownames(installed.packages()) == 'FALSE') BiocManager::install('ComplexHeatmap') 
+
+library(tidyverse)
+library(ggplot2)
+library(writexl)
+library(readxl)
+library(DESeq2)
+library(WGCNA)
+library(flashClust)
+library(dendsort)
+library(ComplexHeatmap)
+```
+
+Load metadata
+
+```{r}
+under96BC <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/conversion_eff/under96.xlsx")
+
+## adding metadata 
+meta <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.xlsx", 
+                  sheet = "Sample List") %>% 
+  dplyr::select(GMGI_ID, Length, Sex, AgeRounded, Season) %>%
+  filter(!GMGI_ID %in% under96BC$GMGI_ID)
+
+meta %>% group_by(AgeRounded) %>%
+  summarise(count = n())
+```
+
+Load methylation data 
+
+```{r}
+### Methylation data for 100% prescence : 7,731 loci 
+load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final.RData")
+head(df100_f4_agelength_final)
+length(unique(df100_f4_agelength_final$Loc))
+
+### Methylation data for 90% prescence : 47,373 loci
+load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
+
+df_f4_agelength_imputed <- results1 %>% rownames_to_column(var = "Loc") %>%
+  gather("GMGI_ID", "percent.meth", 2:last_col()) %>%
+  left_join(., meta, by = "GMGI_ID") %>%
+  dplyr::select(-Length, -Sex, -Season)  %>%
+  filter(!GMGI_ID %in% under96BC$GMGI_ID)
+
+head(df_f4_agelength_imputed)
+length(unique(df_f4_agelength_imputed$Loc))
+```
+
+## Change to correct format 
+
+```{r}
+df <- df_f4_agelength_imputed
+
+df <- df %>% dplyr::select(-AgeRounded) %>% spread(GMGI_ID, percent.meth) %>%
+  column_to_rownames(var = "Loc")
+```
+
+
+### Check that there are no genes with 0 counts across all samples
+
+We had 47,373, genes, which was filtered down to 50,601 by removing genes with row sums of 0 (those not detected in our sequences). 
+
+```{r}
+nrow(df) # 47,373
+
+df <- 
+  df %>%
+  mutate(Total = rowSums(.[, 1:40]))%>%
+  filter(!Total==0)%>%
+  dplyr::select(-Total)
+
+nrow(df) # 47,373
+```
+
+### Conduct data filtering
+
+No **pOverA** filtering needed because all loci are present in all samples 
+
+In order for the DESeq2 algorithms to work, the SampleIDs on the metadta file and count matrices have to match exactly and in the same order. The following R clump will check to make sure that these match. Should return TRUE. 
+
+```{r}
+# Display current order of metadata and gene count matrix.  
+meta$GMGI_ID
+colnames(df)
+
+#Order metadata the same as the column order in the gene matrix.  
+list<-colnames(df)
+list<-as.factor(list)
+
+meta$GMGI_ID <- as.factor(meta$GMGI_ID)
+
+# Re-order the levels
+meta$GMGI_ID <- factor(as.character(meta$GMGI_ID), levels=list)
+# meta$AgeRounded <- as.integer(meta$AgeRounded)
+
+# Re-order the data.frame
+meta_ordered <- meta[order(meta$GMGI_ID),]
+meta_ordered$GMGI_ID 
+```
+
+```{r}
+#Checking that all row and column names match. Should return "TRUE"
+all(rownames(meta_ordered$GMGI_ID) %in% colnames(df))
+all(rownames(meta_ordered$GMGI_ID) == colnames(df)) 
+```
+
+## WGCNA 
+
+Creating obj
+
+```{r}
+datExpr <- as.data.frame(t(df)) #transpose to output to a new data frame with the column names as row names. And make all data numeric
+```
+
+### Cluster the samples to look for obvious outliers
+
+Look for outliers by examining datExpr dataframed (transposed). No obvious single outliers so moved on. 
+
+```{r}
+sampleTree = hclust(dist((datExpr)), method = "average") 
+plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="", cex.lab = 1.5, cex.axis = 1.5, cex.main = 2)
+```
+
+## Network construction and consensus module detection
+
+### Choosing a soft-thresholding power: Analysis of network topology β
+
+The soft thresholding power (β) is the number to which the co-expression similarity is raised to calculate adjacency. The function pickSoftThreshold performs a network topology analysis. The user chooses a set of candidate powers, however the default parameters are suitable values.
+
+```{r, message=FALSE, warning=FALSE}
+# allowWGCNAThreads() 
+# 
+# # Choose a set of soft-thresholding powers
+# powers <- c(seq(from = 1, to=19, by=2), c(21:30)) #Create a string of numbers from 1 through 10, and even numbers from 10 through 20
+# 
+# # Call the network topology analysis function
+# sft <-pickSoftThreshold(datExpr, powerVector = powers, verbose = 5)
+```
+
+Plot the results.
+
+```{r}
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+# # Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+    main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+    labels=powers,cex=cex1,col="red");
+# # this line corresponds to using an R^2 cut-off
+abline(h=0.8,col="red")
+# # Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+    xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+    main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+```
+
+## Step-by-step network construction and module detection: 
+
+### Co-expression adjacency and topological overlap matrix similarity
+
+Co-expression similarity and adjacency, using the soft thresholding power 30 and translate the adjacency into topological overlap matrix to calculate the corresponding dissimilarity. I will use a **signed network** because we have a relatively high softPower, according to (>12): https://peterlangfelder.com/2018/11/25/__trashed/
+
+```{r}
+# softPower=15 #Set softPower to 30
+# adjacency=adjacency(datExpr, power=softPower,type="signed") #Calculate adjacency
+# TOM= TOMsimilarity(adjacency,TOMType = "signed") #Translate adjacency into topological overlap matrix
+# dissTOM= 1-TOM #Calculate dissimilarity in TOM
+# 
+# save(adjacency, TOM, file = "/work/gmgi/Fisheries/epiage/haddock/WCNA/adjTOM.RData")  
+# save(dissTOM, file = "/work/gmgi/Fisheries/epiage/haddock/WCNA/dissTOM.RData")  
+
+load("/work/gmgi/Fisheries/epiage/haddock/WCNA/adjTOM.RData")
+load("/work/gmgi/Fisheries/epiage/haddock/WCNA/dissTOM.RData")
+```
+
+
+```{r}
+# geneTree= flashClust(as.dist(dissTOM), method="average")
+
+# pdf(file="/work/gmgi/Fisheries/epiage/haddock/WCNA/dissTOMClustering.pdf", width=20, height=20)
+# plot(geneTree, xlab="", sub="", main= "Gene Clustering on TOM-based dissimilarity", labels= FALSE,hang=0.04)
+# dev.off()
+
+# minModuleSize = 30
+# dynamicMods = cutreeDynamic(dendro = geneTree, distM = dissTOM,
+# deepSplit = 2, pamRespectsDendro = FALSE,
+# minClusterSize = minModuleSize)
+# table(dynamicMods) #list modules and respective sizes
+# save(dynamicMods, geneTree, file = "/work/gmgi/Fisheries/epiage/haddock/WCNA/dyMod_geneTree.RData") #Save to load into RStudio
+
+dyMod_geneTree <- load(file = "/work/gmgi/Fisheries/epiage/haddock/WCNA/dyMod_geneTree.RData")
+dyMod_geneTree
+```
+
+
+Plot the module assignment under the gene dendrogram
+
+```{r}
+dynamicColors = labels2colors(dynamicMods) # Convert numeric labels into colors
+table(dynamicColors)
+pdf(file="/work/gmgi/Fisheries/epiage/haddock/WCNA/dissTOMColorClustering.pdf", width=20, height=20)
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut", dendroLabels = FALSE, hang = 0.03, addGuide = TRUE, guideHang = 0.05, main = "Gene dendrogram and module colors")
+dev.off()
+```
+### Merge modules whose expression profiles are very similar or choose not to merge
+
+Plot module similarity based on eigengene value
+
+```{r}
+#Calculate eigengenes
+MEList = moduleEigengenes(datExpr, colors = dynamicColors, softPower = 15)
+MEs = MEList$eigengenes
+
+#Calculate dissimilarity of module eigengenes
+MEDiss = 1-cor(MEs)
+
+#Cluster again and plot the results
+METree = flashClust(as.dist(MEDiss), method = "average")
+
+#pdf(file="Output/RNAseq/eigengeneClustering1.pdf", width = 20)
+plot(METree, main = "Clustering of module eigengenes", xlab = "", sub = "")
+#dev.off()
+```
+
+**Merge modules with >85% eigengene similarity.** Most studies use somewhere between 80-90% similarity. It looks like most of our modules are highly related so I will use 85% similarity as my merging threshold.
+
+```{r}
+MEDissThres= 0.15 #merge modules that are 85% similar
+#pdf(file="Output/RNAseq/eigengeneClustering2.pdf", width = 20)
+plot(METree, main = "Clustering of module eigengenes", xlab = "", sub = "")
+abline(h=MEDissThres, col="red")
+#dev.off()
+merge= mergeCloseModules(datExpr, dynamicColors, cutHeight= MEDissThres, verbose =3)
+mergedColors= merge$colors
+mergedMEs= merge$newMEs
+#pdf(file="Output/RNAseq/mergedClusters.pdf", width=20, height=20)
+plotDendroAndColors(geneTree, cbind(dynamicColors, mergedColors), c("Dynamic Tree Cut", "Merged dynamic"), dendroLabels= FALSE, hang=0.03, addGuide= TRUE, guideHang=0.05)
+#dev.off()
+```
+
+Save new colors
+
+```{r}
+moduleColors = mergedColors # Rename to moduleColors
+colorOrder = c("grey", standardColors(50)); # Construct numerical labels corresponding to the colors
+moduleLabels = match(moduleColors, colorOrder)-1;
+MEs = mergedMEs;
+ncol(MEs) # How many modules do we have now?
+```
+
+We are now working with 20, a much more reasonable number.
+
+### Plot new tree
+
+```{r}
+#Calculate dissimilarity of module eigengenes
+MEDiss = 1-cor(MEs)
+
+#Cluster again and plot the results 
+METree = flashClust(as.dist(MEDiss), method = "average")
+MEtreePlot = plot(METree, main = "Clustering of module eigengenes", xlab = "", sub = "")
+```
+
+##  Relating modules to age
+
+### Quantifying module–trait associations
+
+Prepare trait data. Data has to be numeric, so I will substitute time_points and type for numeric values
+
+```{r}
+meta$num <- c("1")
+
+AgeTrait <- as.data.frame(pivot_wider(meta, names_from = AgeRounded, values_from = num, id_cols = GMGI_ID))
+AgeTrait[is.na(AgeTrait)] <- c("0")
+
+## insert either GroupTrait or allTraits
+rownames(AgeTrait) <- AgeTrait$GMGI_ID
+datTraits <- AgeTrait[,c(-1)]
+
+print(datTraits)
+```
+
+Define numbers of Loci and samples
+
+```{r}
+nLoci = ncol(datExpr) # 47,373
+nSamples = nrow(datExpr) # 133
+```
+
+Recalculate MEs with color labels
+
+```{r}
+MEs0 = moduleEigengenes(datExpr, moduleColors,softPower=15)$eigengenes
+MEs = orderMEs(MEs0)
+names(MEs)
+```
+
+Correlations of traits with eigengenes
+
+```{r}
+moduleTraitCor = cor(MEs, datTraits, use = "p");
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples);
+Colors=sub("ME","",names(MEs))
+moduleTraitTree = hclust(dist(t(moduleTraitCor)), method = "average");
+plot(moduleTraitTree, main = "Group clustering based on module-trait correlation", sub="", xlab="", cex.lab = 1.5, cex.axis = 1.5, cex.main = 2)
+```
+
+Correlations of genes with eigengenes
+
+```{r}
+moduleGeneCor=cor(MEs,datExpr)
+moduleGenePvalue = corPvalueStudent(moduleGeneCor, nSamples)
+```
+
+
+### Plot module-trait associations
+
+Represent module trait correlations as a heatmap 
+
+```{r}
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",signif(moduleTraitPvalue, 1), ")", sep = "")
+dim(textMatrix) = dim(moduleTraitCor)
+head(textMatrix)
+
+pdf(file="/work/gmgi/Fisheries/epiage/haddock/WCNA/Module-trait-relationships.pdf")
+labeledHeatmap(Matrix = moduleTraitCor, xLabels = names(datTraits),  yLabels = names(MEs), ySymbols = names(MEs), cex.lab.y= 0.55, cex.lab.x= 0.55, colors = blueWhiteRed(50), textMatrix = textMatrix, setStdMargins = TRUE, cex.text = 0.35, textAdj = , zlim = c(-1,1), main = paste("Module-trait relationships"))
+dev.off()
+```
+
+# Generate a complex heatmap of module-trait relationships.  
+
+```{r}
+#bold sig p-values
+#dendrogram with WGCNA MEtree cut-off
+#colored y-axis
+#Create list of pvalues for eigengene correlation with groups 
+heatmappval <- signif(moduleTraitPvalue, 1)
+#Make list of heatmap row colors
+htmap.colors <- names(MEs)
+htmap.colors <- gsub("ME", "", htmap.colors)
+
+row_dend = dendsort(hclust(dist(moduleTraitCor)))
+col_dend = dendsort(hclust(dist(t(moduleTraitCor))))
+
+group_order <- c("0.65", "1.2", "1.65", "2.2", "2.65", "3.2",  "3.65", "4.2", "4.65" , "5.2", "5.65", 
+                 "6.2", "6.65", "7.2", "7.65", "8.65", "9.2", "9.65", "10.2")
+
+moduleTraitCor <- moduleTraitCor[, group_order]
+
+pdf(file = "/work/gmgi/Fisheries/epiage/haddock/WCNA/Module-trait-relationship-heatmap.pdf", height = 8, width = 8)
+Heatmap(moduleTraitCor, name = "Correlation", 
+        row_title = "Gene Module", column_title = "Eigengene Correlation", 
+        col = blueWhiteRed(50), 
+        row_names_side = "left", 
+        #row_dend_side = "left",
+        width = unit(5, "in"), 
+        height = unit(4.5, "in"), 
+        #column_dend_reorder = TRUE, 
+        #cluster_columns = col_dend,
+        row_dend_reorder = TRUE,
+        #column_split = 6,
+        row_split=6,
+        #column_dend_height = unit(.5, "in"),
+        column_order = group_order, 
+        cluster_rows = row_dend, 
+        row_gap = unit(2.5, "mm"), 
+        border = TRUE,
+        cell_fun = function(j, i, x, y, w, h, col) {
+        if(heatmappval[i, j] < 0.051) {
+            grid.text(sprintf("%s", heatmappval[i, j]), x, y, 
+                      gp = gpar(fontsize = 10, fontface = "bold"))
+        }
+        else {
+            grid.text(sprintf("%s", heatmappval[i, j]), x, y, 
+                      gp = gpar(fontsize = 10, fontface = "plain", col = "grey"))
+        }},
+        column_names_gp =  gpar(fontsize = 12, border=FALSE),
+        column_names_rot = 35,
+        row_names_gp = gpar(fontsize = 12, alpha = 0.75, border = FALSE))
+#draw(ht)
+dev.off()
+```
+
+## Pull out module lightyellow 
+
+Module lightyellow  
+Module grey60 
+
+```{r}
+#### Eigenvalue
+head(MEs)
+
+MElightyellow <- MEs %>% dplyr::select(MElightyellow) %>% rownames_to_column(var = "GMGI_ID") %>% left_join(., meta, by = "GMGI_ID")
+MElightyellow_mean <- MEs %>% dplyr::select(MElightyellow) %>% rownames_to_column(var = "GMGI_ID") %>% left_join(., meta, by = "GMGI_ID") %>%
+  group_by(AgeRounded) %>%
+  reframe(mean = mean(MElightyellow))
+
+MElightyellow %>% ggplot(., aes(x=AgeRounded, y=MElightyellow)) + 
+  geom_point(size=1.5, alpha=0.7, shape=21, color="grey50") +
+  geom_point(data = MElightyellow_mean, aes(x=AgeRounded, y=mean), size=3, alpha=0.7, shape=21, fill="turquoise3") + 
+  theme_bw() +
+  labs(
+    y="Eigenvalue"
+  )
+
+#### Methylation value 
+loci_names <- as.data.frame(colnames(datExpr)) %>% dplyr::rename(Loc=1) %>% mutate(Loci_number = as.character(row_number()))
+
+lightyellow_module_loci <- as.data.frame(moduleColors) %>% subset(moduleColors == "lightyellow") %>% 
+  rownames_to_column(var = "Loci_number") %>%
+  left_join(., loci_names, by = "Loci_number") %>% 
+  left_join(., df %>% rownames_to_column(var = "Loc") %>% 
+              gather("GMGI_ID", "percent.meth", 2:134),
+            by = "Loc") %>%
+  left_join(., meta, by = "GMGI_ID")
+
+lightyellow_module_loci %>% ggplot(., aes(x=AgeRounded, y=percent.meth)) + 
+  geom_point(size=1.5, alpha=0.7, shape=21, color="grey50") +
+ # geom_point(data = MElightyellow_mean, aes(x=AgeRounded, y=mean), size=3, alpha=0.7, shape=21, fill="turquoise3") + 
+  theme_bw() +
+  facet_wrap(~Loc) +
+  labs(
+    y="Methylation %"
+  )
+
+ggsave("/work/gmgi/Fisheries/epiage/haddock/WCNA/lightyellow_modules.png", width=14, height=14)
+```
+
+
+
+
+

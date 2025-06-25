@@ -1,0 +1,230 @@
+---
+title: "Comparing final clocks"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+*Done on server RStudio* 
+
+Load libraries
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(glmnet)   # for generalized linear models
+library(readxl)
+library(ggpubr)
+```
+
+Load meta 
+
+```{r}
+under96BC <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/conversion_eff/under96.xlsx")
+meta <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.xlsx", 
+                  sheet = "Sample List") %>% 
+  dplyr::select(GMGI_ID, Length, Sex, AgeRounded, Season) %>%
+  filter(!GMGI_ID %in% under96BC$GMGI_ID)
+
+cluster1_full_genes <- read.csv("/work/gmgi/Fisheries/epiage/haddock/cluster_full_genelist.csv") %>% subset(cluster=="1")
+
+## 26 in CDS in cluster 1 
+functional_clock <- read.csv("/work/gmgi/Fisheries/epiage/haddock/functional_clock.csv") %>%  
+  mutate(Name = gsub("Name=", "", Name),
+         Loc = gsub("\\|", "_", Loc),
+         Loc = gsub(" ", "_", Loc)) %>%
+  filter(Name %in% cluster1_full_genes$Name)
+```
+
+Load clock data 
+
+```{r}
+# load_as_filename <- function(path) {
+#   assign(tools::file_path_sans_ext(basename(path)), 
+#          get(load(path)), 
+#          envir = .GlobalEnv)
+# }
+# 
+# sapply(list.files("../modelplots", pattern = "\\.RData$", full.names = TRUE), load_as_filename)
+
+load("../modelplots/5-7-2025_5_Lassox7_alpha0.02x650x500/5-7-2025_5_elastic_results_59.RData")
+load("../modelplots/5-7-2025_5_Lassox7_alpha0.02x650x500/5-7-2025_5_lasso_processed_sample_59.RData")
+
+## 1,263 information for this set
+filtered_training_matrix <- sample_obj$training
+filtered_testing_matrix <- sample_obj$testing
+n_sites <- sample_obj$n_sites
+
+all_mae_train <- sample_obj_elastic$all_mae_train
+all_mae_test <- sample_obj_elastic$all_mae_test
+all_r2_train <- sample_obj_elastic$all_r2_train
+all_r2_test <- sample_obj_elastic$all_r2_test
+all_sites_chosen <- sample_obj_elastic$all_sites_chosen 
+all_models <- sample_obj_elastic$all_models 
+all_subsets <- sample_obj_elastic$all_subsets
+
+best_model <- sample_obj_elastic$best_model 
+best_selected <- sample_obj_elastic$best_selected 
+best_subset <- sample_obj_elastic$best_input 
+best_r2_test <- sample_obj_elastic$best_r2_test 
+best_mae_test <- sample_obj_elastic$best_mae_test 
+best_iteration <- sample_obj_elastic$best_iteration 
+```
+
+Export dataframe with age and site information 
+
+```{r}
+# Code to produce predictions 
+
+  # Subset matrices based on best subset
+  best_training_subset <- filtered_training_matrix[, best_subset]
+  best_testing_subset <- filtered_testing_matrix[, best_subset]
+  
+  ## Training models
+  predicted_age <- as.data.frame(predict(best_model, newx = best_training_subset, s = "lambda.min")) %>% 
+    rownames_to_column(var = "GMGI_ID") %>% 
+    dplyr::rename(epi.age = lambda.min)
+  
+  predicted_age_testing <- as.data.frame(predict(best_model, newx = best_testing_subset, s = "lambda.min")) %>% 
+    rownames_to_column(var = "GMGI_ID") %>% 
+    dplyr::rename(epi.age = lambda.min)
+
+  ## Train and testing group labels
+  predicted_age$group <- "training"
+  predicted_age_testing$group <- "testing"
+  
+  predictions <- full_join(predicted_age, predicted_age_testing, by = join_by(GMGI_ID, epi.age, group)) %>%
+    left_join(., meta, by = "GMGI_ID") %>%
+    mutate(epi.age = pmax(epi.age, 0))
+```
+
+Plotting to confirm
+
+```{r}
+predictions %>%
+    ggplot(aes(x = AgeRounded, y = epi.age)) + 
+    theme_classic() + 
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey70") +
+    geom_smooth(method = 'lm', se = FALSE, color = "grey", alpha = 0.8) +
+    geom_point(aes(fill = group), size = 3, alpha = 0.8, color = "black", shape = 21) + 
+    scale_fill_manual(values = c("#588157", "grey90")) +
+    xlim(0,12) + ylim(0,12) +
+    labs(fill = "Set",
+         y = "Epigenetic Age",
+         x = "Otolith Age") +
+    theme(
+      legend.position="right",
+      legend.title = element_text(face="bold", size=18),
+      legend.text = element_text(size=16),
+      strip.text = element_text(face="bold", size=16),
+      axis.title.y = element_text(margin=margin(t=0,r=15,b=0,l=0),size=20,face="bold"),
+      axis.title.x = element_text(margin=margin(t=10,r=0,b=0,l=0),size=20,face="bold"),
+      axis.text.x=element_text(color="black",size=16),
+      axis.text.y=element_text(color="black",size=16),
+      plot.caption=element_text(hjust=0.75,size=16,face="italic")
+    ) +
+    stat_regline_equation(label.x=0.2,label.y=11,size=6,aes(label=after_stat(rr.label))) +
+    
+    annotate(geom="label",x=0,y=10,label=paste0("# Sites: ",length(best_selected)),
+             hjust=0,vjust=1,label.size=NA,color="black",size=6,fill=NA) +
+    
+    annotate(geom="label",x=0,y=8.5,label=paste0("MAE: ",round(best_mae_test,2)), #lowest_mae
+             hjust=0,vjust=1,label.size=NA,color="black",size=6,fill=NA)
+```
+
+Dataframe of selected sites 
+
+```{r}
+clock_sites <- as.data.frame(colnames(filtered_training_matrix[, best_selected])) %>% dplyr::rename(Loc = 1)
+clock_sites %>% write_csv("/work/gmgi/Fisheries/epiage/haddock/clock_sites.csv")
+predictions %>% write_csv("/work/gmgi/Fisheries/epiage/haddock/predictions.csv")
+```
+
+
+### Testing cluster 1 clock 
+
+```{r}
+# age_vector <- as.data.frame(rownames(best_training_subset)) %>% dplyr::rename(GMGI_ID=1) %>% left_join(., meta, by = "GMGI_ID") %>% dplyr::select(AgeRounded)
+# age_vector <- age_vector$AgeRounded
+```
+
+
+```{r}
+# cluster1_Loc <- functional_clock$Loc ##26 sites
+# 
+# # Subset matrices based on best subset
+#   cluster1_Loc_training_subset <- filtered_training_matrix[, cluster1_Loc]
+#   cluster1_Loc_testing_subset <- filtered_testing_matrix[, cluster1_Loc]
+#   
+#   cluster1_Loc_model <- cv.glmnet(
+#       x = cluster1_Loc_training_subset,
+#       y = age_vector,
+#       alpha = 0,
+#       nfolds = 10,
+#       type.measure = "mae",
+#       family = "gaussian",
+#       standardize = FALSE
+#     )
+#   
+#   ## Training models
+#   cluster1_Loc_predicted_age <- as.data.frame(predict(cluster1_Loc_model, newx = cluster1_Loc_training_subset, s = "lambda.min")) %>% 
+#     rownames_to_column(var = "GMGI_ID") %>% 
+#     dplyr::rename(epi.age = lambda.min)
+#   
+#   cluster1_Loc_predicted_age_testing <- as.data.frame(predict(cluster1_Loc_model, newx = cluster1_Loc_testing_subset, s = "lambda.min")) %>% 
+#     rownames_to_column(var = "GMGI_ID") %>% 
+#     dplyr::rename(epi.age = lambda.min)
+# 
+#   ## Train and testing group labels
+#   cluster1_Loc_predicted_age$group <- "training"
+#   cluster1_Loc_predicted_age_testing$group <- "testing"
+#   
+#   cluster1_predictions <- full_join(cluster1_Loc_predicted_age, cluster1_Loc_predicted_age_testing, by = join_by(GMGI_ID, epi.age, group)) %>%
+#     left_join(., meta, by = "GMGI_ID") %>%
+#     mutate(epi.age = pmax(epi.age, 0))
+#   
+# cluster1_predictions %>%
+#     ggplot(aes(x = AgeRounded, y = epi.age)) + 
+#     theme_classic() + 
+#     geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey70") +
+#     geom_smooth(method = 'lm', se = FALSE, color = "grey", alpha = 0.8) +
+#     geom_point(aes(fill = group), size = 3, alpha = 0.8, color = "black", shape = 21) + 
+#     scale_fill_manual(values = c("#588157", "grey90")) +
+#     xlim(0,12) + ylim(0,12) +
+#     labs(fill = "Set",
+#          y = "Epigenetic Age",
+#          x = "Otolith Age") +
+#     theme(
+#       legend.position="right",
+#       legend.title = element_text(face="bold", size=18),
+#       legend.text = element_text(size=16),
+#       strip.text = element_text(face="bold", size=16),
+#       axis.title.y = element_text(margin=margin(t=0,r=15,b=0,l=0),size=20,face="bold"),
+#       axis.title.x = element_text(margin=margin(t=10,r=0,b=0,l=0),size=20,face="bold"),
+#       axis.text.x=element_text(color="black",size=16),
+#       axis.text.y=element_text(color="black",size=16),
+#       plot.caption=element_text(hjust=0.75,size=16,face="italic")
+#     ) +
+#     stat_regline_equation(label.x=0.2,label.y=11,size=6,aes(label=after_stat(rr.label))) +
+#     
+#     annotate(geom="label",x=0,y=10,label=paste0("# Sites: ",length(best_selected)),
+#              hjust=0,vjust=1,label.size=NA,color="black",size=6,fill=NA) +
+#     
+#     annotate(geom="label",x=0,y=8.5,label=paste0("MAE: ",round(best_mae_test,2)), #lowest_mae
+#              hjust=0,vjust=1,label.size=NA,color="black",size=6,fill=NA)
+```
+
+
+
+
+
+
+

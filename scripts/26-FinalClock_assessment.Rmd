@@ -1,0 +1,228 @@
+---
+title: "Final Clock for Haddock Epigenetic Aging Project"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+Load libraries
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(readxl) ## read excel file 
+library(writexl) ## write excel file 
+library(ggpubr)
+```
+
+Load data 
+
+```{r}
+best_clock <- read.csv("data/04_age_prediction/predictions.csv")
+meta <- read_xlsx("data/00_metadata/full_finclips_sampling.xlsx") %>% dplyr::select(Age, Trawl_ID, GMGI_ID)
+
+best_clock %>% 
+  dplyr::select(GMGI_ID, Epigenetic_Age=epi.age, Otolith_age=AgeRounded, Model_Group=group, Sex, Length, Season) %>% 
+  left_join(., meta, by = "GMGI_ID") %>% 
+  write_xlsx("data/04_age_prediction/Haddock_age_prediction.xlsx")
+```
+
+Calculate MAE 
+
+```{r}
+mae <- best_clock %>% group_by(GMGI_ID) %>%
+  mutate(mae = mean(abs(epi.age-AgeRounded))) %>% ungroup()
+
+mae %>% subset(group=="training") %>%
+  summarise(median = median(mae))
+
+mae %>% subset(group=="testing") %>%
+  summarise(median = median(mae))
+
+mae %>% #subset(group=="testing") %>%
+  summarise(median = median(mae))
+```
+
+Plot predictions 
+
+```{r}
+best_clock %>%
+   ggplot(aes(x = AgeRounded, y = epi.age)) + 
+    theme_classic() + 
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey70") +
+    geom_smooth(method = 'lm', se = FALSE, color = "grey", alpha = 0.8) +
+    geom_point(aes(fill = group), size = 3, alpha = 0.8, color = "black", shape = 21) + 
+    scale_fill_manual(values = c("#588157", "grey90")) +
+    xlim(0,12) + ylim(0,12) +
+    labs(fill = "Set",
+         y = "Epigenetic Age",
+         x = "Otolith Age") +
+    theme(
+      legend.position="right",
+      legend.title = element_text(face="bold", size=12),
+      legend.text = element_text(size=10),
+      strip.text = element_text(face="bold", size=12),
+      axis.title.y = element_text(margin=margin(t=0,r=15,b=0,l=0),size=12,face="bold"),
+      axis.title.x = element_text(margin=margin(t=10,r=0,b=0,l=0),size=12,face="bold"),
+      axis.text.x=element_text(color="black",size=10),
+      axis.text.y=element_text(color="black",size=10),
+      plot.caption=element_text(hjust=0.75,size=12,face="italic")
+    ) +
+    stat_regline_equation(label.x=0.2,label.y=11,size=4.5,aes(label=after_stat(rr.label)))
+
+ggsave("manuscript figures/Figure2_clock.png", width=6, height=4.5)
+```
+
+Plot boxplots
+
+```{r}
+mae %>% ggplot(., aes(x=group, y=mae)) + 
+  geom_boxplot(fill=NA, aes(color=group), width=0.4, outlier.shape=NA) +
+  geom_jitter(aes(fill=group), width=0.1, color='black', shape=21, size=1.5, alpha=0.75) +
+  scale_fill_manual(values = c("#588157", "grey90")) +
+  scale_color_manual(values = c("#588157", "grey90")) +
+  labs(
+    y = "Mean Absolute Error (years)",
+    x = "Model Set"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.title.y = element_text(margin=margin(t=0,r=10,b=0,l=0),size=12,face="bold"),
+    axis.title.x = element_text(margin=margin(t=10,r=0,b=0,l=0),size=12,face="bold"),
+    axis.text.x=element_text(color="black",size=10),
+    axis.text.y=element_text(color="black",size=10)
+  )
+
+ggsave("manuscript figures/Figure2_MAE.png", width=3, height=4.5)
+
+# mae %>% ggplot(., aes(x=AgeRounded, y=mae)) + 
+#   #geom_boxplot(fill=NA, aes(color=group), width=0.4, outlier.shape=NA) +
+#   geom_jitter(aes(fill=group), width=0.1, color='black', shape=21, size=1.5, alpha=0.75) +
+#   scale_fill_manual(values = c("#588157", "grey90")) +
+#   scale_color_manual(values = c("#588157", "grey90")) +
+#   labs(
+#     y = "Mean Absolute Error (years)",
+#     x = "Model Set"
+#   ) +
+#   theme_bw() +
+#   theme(
+#     legend.position = "none",
+#     axis.title.y = element_text(margin=margin(t=0,r=10,b=0,l=0),size=12,face="bold"),
+#     axis.title.x = element_text(margin=margin(t=10,r=0,b=0,l=0),size=12,face="bold"),
+#     axis.text.x=element_text(color="black",size=10),
+#     axis.text.y=element_text(color="black",size=10)
+#   )
+```
+
+Rich error 
+
+```{r}
+agg_df <- best_clock %>%
+  mutate(epi_round = as.integer((epi.age)),
+         otolith_round = as.integer((AgeRounded))) %>%
+  dplyr::select(epi_round, otolith_round) %>%
+  #gather("method", "age", epi_round:otolith_round) %>%
+  group_by(epi_round, otolith_round)
+  
+agg_df_counted <- aggregate(cbind(count = 1:nrow(agg_df)) ~ epi_round + otolith_round, 
+                    data = agg_df, 
+                    FUN = length)
+  
+  
+
+ggplot(data = agg_df_counted, aes(x = otolith_round, y = epi_round)) +
+  geom_point(aes(size = count), alpha = 0.7, color = 'lightblue') +
+  geom_text(aes(label = count), color = "black", size = 3) +
+  theme_bw(base_size = 15) +
+  labs(
+    x = "Otolith age (years)",
+    y = "Epigenetic age (years)",
+    size = "Number of samples"
+  ) +
+  scale_size(range = c(3, 12)) +
+  scale_x_continuous(
+    breaks = seq(floor(min(agg_df_counted$otolith_round)), 
+                 ceiling(max(agg_df_counted$otolith_round)), by = 1)
+  ) +
+  scale_y_continuous(
+    breaks = seq(floor(min(agg_df_counted$epi_round)), 
+                 ceiling(max(agg_df_counted$epi_round)), by = 1)
+  ) +
+  theme(
+    panel.grid.major = element_line(color = "grey87", linetype = "dotted"),
+    panel.grid.minor = element_blank(),
+    axis.title.y = element_text(margin=margin(t=0,r=10,b=0,l=0),face="bold"),
+    axis.title.x = element_text(margin=margin(t=10,r=0,b=0,l=0),face="bold")
+  )
+```
+
+
+```{r}
+best_clock
+
+# Define your bin breaks
+breaks <- c(0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5)
+labels <- c("0-0.5", "0.5-1", "1-1.5", "1.5-2", "2-2.5", "2.5-3", "3-3.5", "3.5-4", "4-4.5", "4.5-5",
+            "5-5.5", "5.5-6", "6-6.5", "6.5-7", "7-7.5", "7.5-8", "8-8.5", "8.5-9", "9-9.5", "9.5-10", "10-10.5")
+
+
+# Bin both columns
+best_clock$epi.age_bin <- cut(best_clock$epi.age, breaks = breaks, labels = labels, include.lowest = TRUE)
+best_clock$Agerounded_bin <- cut(best_clock$AgeRounded, breaks = breaks, labels = labels, include.lowest = TRUE)
+
+# Check if bins are the same
+best_clock$same_bin <- best_clock$epi.age_bin == best_clock$Agerounded_bin
+
+# Count how many match
+sum(best_clock$same_bin)
+
+best_clock_agg_df_counted <- aggregate(cbind(count = 1:nrow(best_clock)) ~ `epi.age_bin` + `Agerounded_bin`, 
+                    data = best_clock, 
+                    FUN = length)
+
+ggplot(data = best_clock_agg_df_counted, aes(x = Agerounded_bin, y = epi.age_bin)) +
+  geom_point(aes(size = count), alpha = 0.7, color = 'lightblue') +
+  geom_text(aes(label = count), color = "black", size = 3) +
+  theme_bw(base_size = 13) +
+  labs(
+    x = "Otolith age (years)",
+    y = "Epigenetic age (years)",
+    size = "Number of samples"
+  ) +
+  scale_size(range = c(3, 12)) +
+  # scale_x_continuous(
+  #   breaks = seq(floor(min(agg_df_counted$otolith_round)), 
+  #                ceiling(max(agg_df_counted$otolith_round)), by = 1)
+  # ) +
+  # scale_y_continuous(
+  #   breaks = seq(floor(min(agg_df_counted$epi_round)), 
+  #                ceiling(max(agg_df_counted$epi_round)), by = 1)
+  # ) +
+  theme(
+    panel.grid.major = element_line(color = "grey87", linetype = "dotted"),
+    panel.grid.minor = element_blank(),
+    axis.title.y = element_text(margin=margin(t=0,r=10,b=0,l=0),face="bold"),
+    axis.title.x = element_text(margin=margin(t=10,r=0,b=0,l=0),face="bold")
+  )
+```
+
+
+
+
+
+
+
+
+
+
+
+

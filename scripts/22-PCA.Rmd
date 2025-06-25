@@ -1,0 +1,182 @@
+---
+title: "Plotting PCA of DNA methylation to find outliers"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+*Done on server RStudio*  
+
+## Load libraries
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(strex) ## for data transformation 
+library(vegan) ## for stats
+library(readxl)
+library(factoextra)
+```
+
+## Load data 
+
+```{r}
+meta <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.xlsx", sheet = "Sample List") 
+metadata_additional <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/metadata/full_finclips_sampling.xlsx") %>%
+  dplyr::select(GMGI_ID, Maturity, `Weight Kg`, `Latitude Dec`, `Longitude Dec`)
+
+meta <- meta %>% left_join(., metadata_additional, by = "GMGI_ID") %>% dplyr::rename(sample=GMGI_ID) %>%
+  filter(!sample=="Mae-285") %>%
+  filter(!sample=="Mae-424") %>%
+  filter(!sample=="Mae-422") %>%
+  filter(!sample=="Mae-500") %>%
+  filter(!sample=="Mae-299")
+
+meta_subset <- meta %>% dplyr::select(sample, `Weight Kg`, Maturity, `Latitude Dec`, `Longitude Dec`)
+
+load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final.RData")  
+load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
+df_f4_agelength_imputed <- results1
+
+df <- df100_f4_agelength_final %>% left_join(., meta_subset, by = "sample") %>%
+  
+  # df_f4_agelength_imputed %>%
+  # rownames_to_column(var = "Loc") %>%
+  # gather("sample", "percent.meth", 2:last_col()) %>%
+  # left_join(., meta, by = "sample") %>%
+  
+  dplyr::select(sample, Loc, percent.meth, `Length Cm`, `Ind Sex`, AgeRounded, 
+                sampling_season, Maturity, `Weight Kg`, `Latitude Dec`, `Longitude Dec`) %>%
+  filter(!sample=="Mae-285") %>%
+  filter(!sample=="Mae-424") %>%
+  filter(!sample=="Mae-422") %>%
+  filter(!sample=="Mae-500") %>%
+  filter(!sample=="Mae-299")
+  
+head(df) 
+
+matrix <- df %>% dplyr::select(sample, Loc, percent.meth) %>% spread(Loc, percent.meth) %>%
+  column_to_rownames(var = "sample")
+```
+
+## PERMANOVA and NMDS 
+
+```{r}
+adonis2(matrix ~ Sex*Season*AgeRounded*Length, data = meta, method='eu', permutations = 99)
+
+nmds <- metaMDS(matrix, distance = "bray")
+
+data.scores <- as.data.frame(scores(nmds)$sites) %>%
+  rownames_to_column(var = "sample") %>%
+  left_join(., meta, #%>% rownames_to_column(var = "sample"), 
+            by = "sample")  
+```
+
+NMDS plot stress value too high for comfort. 
+
+```{r} 
+data.scores %>%
+  ggplot(., aes(x=NMDS1, y=NMDS2)) +
+  
+  geom_point(aes(fill=AgeRounded), alpha = 0.7, size=2.5, shape=21, color = 'black') + 
+  scale_fill_viridis_c(direction = -1) +
+  theme_bw() + 
+  labs(
+    x = "
+    NMDS1",
+    y = "NMDS2",
+    fill = "Age"
+  ) +
+  
+  ## adding stress value to plot (user edits x and y to desired location)
+  annotate(geom = "label", x = 0.008, y = 0.015, 
+           label = sprintf("Stress: %.3f", nmds$stress), hjust = 0, vjust = 1, 
+           label.size = NA, fontface = "italic", color = "grey30", size = 3.25, fill="white") +
+  
+  theme(
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=12),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=12),
+    axis.text.y = element_text(colour = 'black', size = 10),
+    axis.text.x = element_text(colour = 'black', size = 10),
+    #legend.title = element_text(margin = margin(t = 0, r = 0, b = 5, l = 0), size=10, color="black", face="bold"),
+    strip.text.x = element_text(color = "black", face = "bold", size = 12),
+    strip.background = element_rect(color= "black", fill = "white")
+  ) 
+```
+
+PCA 
+
+```{r}
+pca <- prcomp(t(matrix), scale = TRUE, center = TRUE)
+fviz_eig(pca, addlabels = TRUE) ## double check this PC1 % matches calculation below 
+var_explained <- pca$sdev^2 / sum(pca$sdev^2) * 100
+
+pca_coord <- as.data.frame(pca$rotation) %>% dplyr::select(PC1, PC2) %>%
+  rownames_to_column(var = "sample") %>% 
+  left_join(., meta, #%>% rownames_to_column(var="sample"), 
+            by = "sample")
+
+pca_coord %>%
+  ggplot(., aes(x=PC1, y=PC2)) +
+  
+  geom_point(aes(fill=AgeRounded), alpha = 0.7, size=2.5, shape=21, color = 'black') + 
+  scale_fill_viridis_c(direction = -1) +
+  theme_bw() + 
+  labs(
+    x = sprintf("PC1 (%.1f%%)", var_explained[1]),
+    y = sprintf("PC2 (%.1f%%)", var_explained[2]),
+    #fill = "Age"
+  ) + 
+  
+  theme(
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=12),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=12),
+    axis.text.y = element_text(colour = 'black', size = 10),
+    axis.text.x = element_text(colour = 'black', size = 10),
+    strip.text.x = element_text(color = "black", face = "bold", size = 12),
+    strip.background = element_rect(color= "black", fill = "white")
+  )
+
+pca_coord %>% filter(PC1 > -0.082)
+## Mae-285, 299, 422, 424, and 500
+
+loadings <- pca$rotation
+
+# Extract the loadings for PC1
+pc1_loadings <- loadings[, 1]
+pc2_loadings <- loadings[, 2]
+
+# Sort the loadings in descending order of absolute value
+sorted_loadings_PC1 <- sort(abs(pc1_loadings), decreasing = TRUE, index.return = TRUE)
+sorted_loadings_PC2 <- sort(abs(pc2_loadings), decreasing = TRUE, index.return = TRUE)
+
+# From matrix, make column numbers 
+column_info <- as.data.frame(colnames(matrix)) %>% dplyr::rename(Loc = 1) %>%
+  mutate(column_no = row_number())
+
+# Print the top contributing CpG sites
+top_contributors_PC1 <- as.data.frame(sorted_loadings_PC1$ix[1:20]) %>% 
+  dplyr::rename(column_no=1) %>% left_join(., column_info, by = "column_no")
+
+top_contributors_PC2 <- as.data.frame(sorted_loadings_PC2$ix[1:300])  %>% 
+  dplyr::rename(column_no=1) %>% left_join(., column_info, by = "column_no")
+
+top_contributors_PC2 %>% 
+  write.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/PC2_loadings_df100_AL.csv")
+
+```
+
+
+
+
+
+
+

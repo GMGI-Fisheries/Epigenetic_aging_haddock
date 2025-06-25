@@ -1,0 +1,119 @@
+---
+title: "Plotting genomic location for Haddock Epigenetic Aging Project"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+Load libraries
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(readxl) ## read excel file 
+library(writexl) ## write excel file 
+library(ggpubr)
+```
+
+Load data 
+
+```{r}
+full_location <- read.csv("data/100p_genomiclocation.csv")
+clock_location <- read.csv("data/clock_genomiclocation.csv")
+
+scaffold_full <- read.csv("data/scaffold_loci_length_df100_AL.csv")
+scaffold_clock <- read.csv("data/scaffold_loci_length_clock.csv")
+
+desired_order <- c("Promoter", "Terminator", "Other", "Intron", "CDS", "UTR5", "UTR3")
+```
+
+Plot
+
+```{r}
+full_location %>% mutate(x="x") %>%
+  mutate(Region = factor(Region, levels = desired_order)) %>%
+  ggplot(., aes(x=x, y=Value)) + 
+  
+  geom_bar(stat = "identity", position = "stack", aes(fill=Region), color='grey20') +
+  labs(
+    y="Number of CpG Loci",
+    x="",
+    fill=""
+  ) +
+  scale_fill_manual(values = c("#F3FBEF", "#C2E1C4", "#9CC398", "#caf0f8", "#8ecae6", "#61a5c2", "#0077b6")) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_blank(),
+    legend.position = "right",
+    axis.text.y = element_text(size=10, color="black"),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=12, face="bold")
+  )
+
+ggsave("manuscript figures/Figure3_genomic100p.png", width=4, height=5)
+```
+
+
+```{r}
+clock_location %>% mutate(x="x") %>%
+  mutate(Region = factor(Region, levels = desired_order)) %>%
+  ggplot(., aes(x=x, y=Value)) + 
+  
+  geom_bar(stat = "identity", position = "stack", aes(fill=Region), color='grey20') +
+  labs(
+    y="Number of CpG Loci",
+    x="",
+    fill=""
+  ) +
+  scale_fill_manual(values = c("#F3FBEF", "#C2E1C4", "#9CC398", "#caf0f8", "#8ecae6", "#61a5c2", "#0077b6")) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_blank(),
+    legend.position = "right",
+    axis.text.y = element_text(size=10, color="black"),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=12, face="bold")
+  )
+
+ggsave("manuscript figures/Figure3_genomic_clock.png", width=4, height=5)
+```
+
+
+Scaffold plot
+
+```{r}
+scaffold_full %>%
+  ggplot(aes(x=scaffold, y=number_of_loci)) + 
+  geom_point(size=1.5, shape=21, fill="grey80", color='black', alpha=0.5,) +
+  labs(
+    y = "Number of CpG loci",
+    x = "Scaffold"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),  # This removes the x-axis tick marks
+    axis.text.y = element_text(size=10, color="black"),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=12, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=12, face="bold")
+  )
+
+ggsave("manuscript figures/Figure3_scaffolds.png", width=8, height=5)
+```
+
+
+
+
+
+
+
+
+
+
+

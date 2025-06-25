@@ -1,0 +1,98 @@
+---
+title: "Core site list"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+*Done on server RStudio* 
+
+Load libraries
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(glmnet)   # for generalized linear models
+library(readxl)
+library(ggpubr)
+```
+
+Single data 
+
+```{r}
+# load("../modelplots/5-7-2025_5_Lassox7_alpha0.02x650x500/5-7-2025_5_elastic_results_59.RData")
+# load("../modelplots/5-7-2025_5_Lassox7_alpha0.02x650x500/5-7-2025_5_lasso_processed_sample_59.RData")
+# 
+# filtered_training_matrix <- sample_obj$training
+# filtered_testing_matrix <- sample_obj$testing
+# best_subset <- sample_obj_elastic$best_input 
+# 
+# # Subset matrices based on best subset
+# best_training_subset <- filtered_training_matrix[, best_subset]
+# Loci_list <- as.data.frame(colnames(best_training_subset))
+```
+
+
+Load data from folder path
+
+```{r}
+# Initialize list to store results from all pairs
+combined_loci <- list()
+
+for (i in 1:100) {
+  # Generate file paths for each pair
+  elastic_path <- sprintf("../modelplots/5-7-2025_5_Lassox7_alpha0.02x650x500/5-7-2025_5_elastic_results_%d.RData", i)
+  lasso_path <- sprintf("../modelplots/5-7-2025_5_Lassox7_alpha0.02x650x500/5-7-2025_5_lasso_processed_sample_%d.RData", i)
+  
+  # Create temporary environment for safe loading
+  temp_env <- new.env()
+  
+  # Load both files into the temporary environment
+  load(elastic_path, envir = temp_env)
+  load(lasso_path, envir = temp_env)
+  
+  # Extract objects from environment
+  sample_obj_elastic <- temp_env$sample_obj_elastic
+  sample_obj <- temp_env$sample_obj
+  
+  # Your existing processing logic
+  filtered_training_matrix <- sample_obj$training
+  filtered_testing_matrix <- sample_obj$testing
+  best_subset <- sample_obj_elastic$best_input 
+  
+  best_training_subset <- filtered_training_matrix[, best_subset]
+  Loci_list <- as.data.frame(colnames(best_training_subset))
+  
+  # Store results with pair identifier
+  combined_loci[[i]] <- Loci_list %>% 
+    mutate(pair_id = i) %>% 
+    rename(locus_name = `colnames(best_training_subset)`)
+}
+
+# Combine all results into one dataframe
+final_loci_df <- bind_rows(combined_loci)
+
+# Optional: Remove temporary objects
+rm(temp_env, sample_obj, sample_obj_elastic)
+
+# Count frequency of loci across all pairs
+loci_frequency <- final_loci_df %>% #dplyr::select(locus_name) %>% distinct()
+  count(locus_name, sort = TRUE) %>%
+  dplyr::rename(Loc=locus_name, Number_of_models=n)
+
+loci_frequency %>% write.csv("../core_CpG_sites.csv")
+```
+
+
+
+
+
+
