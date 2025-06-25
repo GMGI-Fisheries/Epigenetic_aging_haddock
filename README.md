@@ -1,4 +1,4 @@
-# Epigenetic Aging
+# Epigenetic Aging: Haddock, Melanogrammus aeglefinus
 Development of a method to age fish using the 'epigenetic clock' theory. 
 
 [Abstract - insert final version]
