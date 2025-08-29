@@ -26,11 +26,13 @@ library(ggpubr)
 Load data 
 
 ```{r}
-full_location <- read.csv("data/100p_genomiclocation.csv")
-clock_location <- read.csv("data/clock_genomiclocation.csv")
+location90p <- read.csv("data/05_genomic_location/90p_genomiclocation.csv")
+location100p <- read.csv("data/05_genomic_location/100p_genomiclocation.csv")
+clock_location <- read.csv("data/05_genomic_location/clock_genomiclocation.csv")
 
-scaffold_full <- read.csv("data/scaffold_loci_length_df100_AL.csv")
-scaffold_clock <- read.csv("data/scaffold_loci_length_clock.csv")
+scaffold_full <- read.csv("data/05_genomic_location/scaffold_loci_length_df100_AL.csv")
+scaffold_clock <- read.csv("data/05_genomic_location/scaffold_loci_length_clock.csv")
+scaffold_90p <- read.csv("data/05_genomic_location/scaffold_loci_length_90p.csv")
 
 desired_order <- c("Promoter", "Terminator", "Other", "Intron", "CDS", "UTR5", "UTR3")
 ```
@@ -81,27 +83,58 @@ clock_location %>% mutate(x="x") %>%
     axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=12, face="bold")
   )
 
-ggsave("manuscript figures/Figure3_genomic_clock.png", width=4, height=5)
+ggsave("manuscript figures/Figure3_genomic_clock.png", width=3.75, height=5)
+```
+
+
+```{r}
+location90p %>% mutate(x="x") %>%
+  mutate(feature_type = factor(feature_type, levels = desired_order)) %>%
+  ggplot(., aes(x=x, y=Value)) + 
+  
+  geom_bar(stat = "identity", position = "stack", aes(fill=feature_type), color='grey20') +
+  labs(
+    y="Number of CpG Loci",
+    x="",
+    fill=""
+  ) +
+  scale_fill_manual(values = c("#F3FBEF", "#C2E1C4", "#9CC398", "#caf0f8", "#8ecae6", "#61a5c2", "#0077b6")) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_blank(),
+    legend.position = "right",
+    axis.text.y = element_text(size=10, color="black"),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=12, face="bold")
+  )
+
+ggsave("manuscript figures/Figure3_genomic_90p.png", width=4, height=5)
 ```
 
 
 Scaffold plot
 
 ```{r}
-scaffold_full %>%
-  ggplot(aes(x=scaffold, y=number_of_loci)) + 
-  geom_point(size=1.5, shape=21, fill="grey80", color='black', alpha=0.5,) +
+scaffold_90p %>%
+  mutate(Sequence.Length = as.numeric(Sequence.Length),
+         Log.Length = log10(Sequence.Length),
+         Ratio = number_of_loci/Sequence.Length
+         ) %>%
+  
+  ggplot(aes(x = Sequence.Length, y = number_of_loci)) + 
+  geom_point(size = 1.5, shape = 21, fill = "grey80", color = "black", alpha = 0.5) +
   labs(
     y = "Number of CpG loci",
-    x = "Scaffold"
+    x = "Scaffold length (bp)"
   ) +
-  theme_classic() +
+  scale_x_continuous(expand = expansion(mult = c(0.025, 0.05)),
+                     labels = scales::label_comma()) +
+  theme_bw() +
   theme(
-    axis.text.x = element_blank(),
-    axis.ticks.x = element_blank(),  # This removes the x-axis tick marks
-    axis.text.y = element_text(size=10, color="black"),
-    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=12, face="bold"),
-    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=12, face="bold")
+    axis.ticks.x = element_blank(),
+    axis.text.y = element_text(size = 10, color = "black"),
+    axis.text.x = element_text(size = 10, color = "black"),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size = 12, face = "bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size = 12, face = "bold")
   )
 
 ggsave("manuscript figures/Figure3_scaffolds.png", width=8, height=5)

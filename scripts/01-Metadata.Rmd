@@ -56,17 +56,17 @@ library("ggspatial")
 Looking at catch for smith proposal 
 
 ```{r}
-Trawl_data <- read.csv("data/00_metadata/22561_UNION_FSCS_SVLEN.csv")
-
-Trawl_data %>% filter(str_detect(SCIENTIFIC_NAME, "Centropristis striata") |
-                      str_detect(SCIENTIFIC_NAME, "Scomber scombrus") |
-                      str_detect(SCIENTIFIC_NAME, "Pseudopleuronectes americanus") |
-                      str_detect(SCIENTIFIC_NAME, "Clupea harengus") |
-                      str_detect(SCIENTIFIC_NAME, "Melanogrammus aeglefinus")) %>%
-  ggplot(., aes(x=LENGTH)) +
-  geom_histogram() +
-  facet_wrap(~SCIENTIFIC_NAME) +
-  theme_bw()
+# Trawl_data <- read.csv("data/00_metadata/22561_UNION_FSCS_SVLEN.csv")
+# 
+# Trawl_data %>% filter(str_detect(SCIENTIFIC_NAME, "Centropristis striata") |
+#                       str_detect(SCIENTIFIC_NAME, "Scomber scombrus") |
+#                       str_detect(SCIENTIFIC_NAME, "Pseudopleuronectes americanus") |
+#                       str_detect(SCIENTIFIC_NAME, "Clupea harengus") |
+#                       str_detect(SCIENTIFIC_NAME, "Melanogrammus aeglefinus")) %>%
+#   ggplot(., aes(x=LENGTH)) +
+#   geom_histogram() +
+#   facet_wrap(~SCIENTIFIC_NAME) +
+#   theme_bw()
 ```
 
 
@@ -76,7 +76,7 @@ Trawl_data %>% filter(str_detect(SCIENTIFIC_NAME, "Centropristis striata") |
 ## Load sample ID files
 
 ```{r}
-labwork_id <- read_xlsx("C:/BoxDrive/Box/Science/Fisheries/Projects/Epigenetic Aging/Haddock/Labwork/Haddock_labwork.xlsx") %>%
+labwork_id <- read_xlsx("C:/BoxDrive/Box/Science/Fisheries/Projects/Epigenetic Aging/_Haddock/Labwork/Haddock_labwork.xlsx") %>%
   dplyr::select(Trawl_ID, GMGI_ID)
 labwork_id$Trawl_ID <- as.character(labwork_id$Trawl_ID)
 ```
@@ -88,7 +88,7 @@ labwork_id$Trawl_ID <- as.character(labwork_id$Trawl_ID)
 ## skip the remaining three lines b/c they have work in the excel file that we don't need here 
 ## "C:\Users\EmmaStrand\MyProjects\Epigenetic_aging\data\metadata\spring2023_haddock_finclips_aged.xlsx"
 
-spring2023 <- read_excel("data/00_metadata/Spring2023_haddock_finclips_aged.xlsx",
+spring2023 <- read_excel("data/00_metadata/age data/Spring2023_haddock_finclips_aged.xlsx",
                          sheet = "sheet1", col_types = c(
                            "text", "text", "text", "text", "text", "date", 
                            "numeric", "numeric", "text", "text", "text", "text", 
@@ -96,7 +96,7 @@ spring2023 <- read_excel("data/00_metadata/Spring2023_haddock_finclips_aged.xlsx
                            "text", "text", "numeric", "numeric", "numeric", "numeric", "skip", "skip", "skip"))
 nrow(spring2023) # 112 entries 
 
-fall2022 <- read_excel("data/00_metadata/Fall2022_haddock_finclips_aged.xlsx",
+fall2022 <- read_excel("data/00_metadata/age data/Fall2022_haddock_finclips_aged.xlsx",
                        sheet = "sheet1", col_types = c(
                          "text", "text", "text", "text", "date", "numeric", "numeric",
                          "text", "text", "numeric", "numeric", "text", "text", "text", "numeric",
@@ -104,16 +104,18 @@ fall2022 <- read_excel("data/00_metadata/Fall2022_haddock_finclips_aged.xlsx",
 
 nrow(fall2022) # 165 entries
 
-fall2023 <- read_excel("data/00_metadata/Fall2023_sampling.xlsx", skip=1,
-                       col_types = c("text", "text", "text", "date", "numeric", "numeric",
-                                     "text", "text", "numeric"),
-                       col_names = c("Cruise Id", "Operation Id", "Organism Id", "Operation Date",
-                                     "Latitude Dec", "Longitude Dec", "Species Name", "INVESTIGATOR", "Length Cm")) %>%
-  subset(`Species Name` == "Melanogrammus aeglefinus (haddock)")
+fall2023_sample_list <- read_excel("data/00_metadata/Fall2023_sampling.xlsx") %>%
+  subset(SPECIES == "Melanogrammus aeglefinus (haddock)")
+
+fall2023 <- read_excel("data/00_metadata/age data/Fall2023_haddock_finclips_aged.xlsx") %>%
+  filter(`Organism Id` %in% fall2023_sample_list$ORGANISM_ID) %>%
+  mutate(
+    AgeRounded = Age+0.65
+  )
 
 nrow(fall2023) # 108 entries 
 
-spring2024 <- read_excel("data/00_metadata/Spring2024_sampling.xlsx", skip=1,
+spring2024 <- read_excel("data/00_metadata/age data/Spring2024_sampling.xlsx", skip=1,
                       col_types = c("text", "text", "text", "date", "numeric", "numeric",
                                      "text", "text", "numeric", "numeric", "text", "text", "text"),
                        col_names = c("Operation Id", "Stratum", "Tow", "Operation Date",
@@ -521,44 +523,58 @@ ggsave(age_bin_example, file="data/02_catch_data/age_bin_length.png", width=7, h
 Metadata file needed for methylseq pipeline. Methylseq requires you to rename your samples to add the replicate using a _ followed by a number _1 or _REP1 or _R1.
 
 ```{r}
-# file_names <- read.delim("data/metadata/file_size2.txt", header=FALSE) %>%
-#   separate(V1, c("file_size", "fastq_1"), sep = " ") %>% dplyr::select(-file_size)
-
-file_names <- read.delim("data/00_metadata/file_names_full.txt", header=FALSE) %>% dplyr::rename(fastq_1 = V1)
-
-# keeping only first 7 characters
-file_names$sample <- substr(file_names$fastq_1, 1, 7)
-
-# keeping only rows with R1
-file_names <- filter(file_names, grepl("R1", fastq_1, ignore.case = TRUE))
-
-# duplicating column 
-file_names$fastq_2 <- file_names$fastq_1
-
-# replacing R1 with R2 in only one column 
-file_names$fastq_2 <- gsub("R1", "R2", file_names$fastq_2)
-
-# rearranging columns 
-file_names <- file_names[,c(2,1,3)]
-
-# # pasting the above column with the fastq1 and 2 columns 
-# file_names$fastq_1 <- paste("/data/prj/Fisheries/epiage/haddock/raw_data/",
+# # file_names <- read.delim("data/metadata/file_size2.txt", header=FALSE) %>%
+# #   separate(V1, c("file_size", "fastq_1"), sep = " ") %>% dplyr::select(-file_size)
+# 
+# file_names <- read.delim("data/00_metadata/file_names_full.txt", header=FALSE) %>% dplyr::rename(fastq_1 = V1)
+# 
+# # keeping only first 7 characters
+# file_names$sample <- substr(file_names$fastq_1, 1, 7)
+# 
+# # keeping only rows with R1
+# file_names <- filter(file_names, grepl("R1", fastq_1, ignore.case = TRUE))
+# 
+# # duplicating column 
+# file_names$fastq_2 <- file_names$fastq_1
+# 
+# # replacing R1 with R2 in only one column 
+# file_names$fastq_2 <- gsub("R1", "R2", file_names$fastq_2)
+# 
+# # rearranging columns 
+# file_names <- file_names[,c(2,1,3)]
+# 
+# # # pasting the above column with the fastq1 and 2 columns 
+# # file_names$fastq_1 <- paste("/data/prj/Fisheries/epiage/haddock/raw_data/",
+# #                             file_names$fastq_1, sep = "")
+# # file_names$fastq_2 <- paste("/data/prj/Fisheries/epiage/haddock/raw_data/",
+# #                             file_names$fastq_2, sep = "")
+# 
+# file_names$fastq_1 <- paste("/work/gmgi/Fisheries/epiage/haddock/raw_data/",
 #                             file_names$fastq_1, sep = "")
-# file_names$fastq_2 <- paste("/data/prj/Fisheries/epiage/haddock/raw_data/",
+# file_names$fastq_2 <- paste("/work/gmgi/Fisheries/epiage/haddock/raw_data/",
 #                             file_names$fastq_2, sep = "")
-
-file_names$fastq_1 <- paste("/work/gmgi/Fisheries/epiage/haddock/raw_data/",
-                            file_names$fastq_1, sep = "")
-file_names$fastq_2 <- paste("/work/gmgi/Fisheries/epiage/haddock/raw_data/",
-                            file_names$fastq_2, sep = "")
-
-## methylseq requires sample names to have _REP1 
-file_names$sample <- paste(file_names$sample, "_REP1", sep="")
-
-## exporting file to repo 
-file_names %>% write.csv("data/00_metadata/samplesheet_NU_full.csv")
+# 
+# ## methylseq requires sample names to have _REP1 
+# file_names$sample <- paste(file_names$sample, "_REP1", sep="")
+# 
+# ## exporting file to repo 
+# file_names %>% write.csv("data/00_metadata/samplesheet_NU_full.csv")
 ```
 
+### Demographic information
+
+```{r}
+data_demographics <- data %>% mutate(AgeRounded = as.factor(AgeRounded)) %>% 
+  dplyr::rename(Sex=`Ind Sex`, Weight=`Weight Kg`, Length=`Length Cm`) %>%
+  filter(!is.na(Sex))
+
+summarySE(
+  data = data_demographics,
+  groupvars = c("Sex", "AgeRounded"),
+  measurevar = "Weight"
+) %>% dplyr::select(-sd, -ci) %>% dplyr::rename(mean=Weight) 
+
+```
 
 
 

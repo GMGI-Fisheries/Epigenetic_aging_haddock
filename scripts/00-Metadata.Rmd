@@ -633,6 +633,30 @@ manuscript_data %>% filter(!is.na(`Ind Sex`)) %>%
 ggsave("data/02_catch_data/Weight_v_Age_sex_manuscript.png", width=8, height=5)
 ```
 
+## Demographic statistics 
+
+```{r}
+demo_data <- manuscript_data %>% dplyr::rename(Sex=`Ind Sex`, Weight=`Weight Kg`, Length=`Length Cm`) %>%
+  mutate(AgeRounded = as.factor(AgeRounded))
+colnames(demo_data)
+
+range(demo_data$Weight, na.rm = TRUE)
+
+summarySE(
+  data = demo_data,
+  groupvars = c("Sex", "AgeRounded"),
+  measurevar = "Weight"
+) %>% dplyr::select(-sd, -ci) %>% dplyr::rename(mean=Weight) %>%
+  filter(!is.na(AgeRounded)) %>% write_xlsx("data/02_catch_data/Manuscript_weight_data.xlsx")
+
+summarySE(
+  data = demo_data,
+  groupvars = c("Sex", "AgeRounded"),
+  measurevar = "Length"
+) %>% dplyr::select(-sd, -ci) %>% dplyr::rename(mean=Length) %>%
+  filter(!is.na(AgeRounded)) %>% write_xlsx("data/02_catch_data/Manuscript_length_data.xlsx")
+```
+
 
 ## Export cleaned data 
 

@@ -191,6 +191,7 @@ WGBS_data %>%
   facet_wrap(~`Ind Sex`)+ 
   labs(
     #color = "Season",
+    x = "Otolith Age (years)",
     fill = "Length (cm)"
   ) +
   
@@ -202,7 +203,7 @@ WGBS_data %>%
         
         )
 
-ggsave("manuscript figures/Supplemental_Figure3_alt.png", width=8, height=4)
+ggsave("manuscript figures/Supplemental_Figure4.png", width=8, height=4)
 ```
 
 ```{r}
@@ -229,6 +230,7 @@ WGBS_data %>%
   facet_wrap(~`Ind Sex`)+
   theme_bw()
 ```
+
 ```{r}
 WGBS_data %>% 
   dplyr::select(GMGI_ID, AgeRounded, `Weight Kg`, `mCpG (%)`, `Ind Sex`, `Length Cm`, Maturity, sampling_season) %>%
