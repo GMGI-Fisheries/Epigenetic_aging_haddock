@@ -1,0 +1,56 @@
+---
+title: "Concatentating function, location, signifiance information"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+*Done on server RStudio*  
+
+https://figshare.com/articles/dataset/Assembly_and_annotation_for_haddock/5182861?file=8834818
+
+## Load libraries
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(strex) ## for data transformation 
+library(fuzzyjoin)
+library(strex)
+```
+
+## Read in data 
+
+Genomic location
+
+```{r}
+gfunction <- read.csv("/projects/gmgi/Fisheries/epiage/haddock/90p_genomicfunction.csv") %>% dplyr::select(-X) 
+
+glocation <- read.csv("/projects/gmgi/Fisheries/epiage/haddock/90p_genomiclocation.csv") %>% dplyr::select(-X) %>%
+  separate(Loc, c("scaffold", "position"), sep = " ", remove=FALSE) %>%
+  mutate(position = as.numeric(position),
+         position = position+1,
+         scaffold = str_after_nth(scaffold, "\\|", 2)
+         )
+
+significance <- read.csv("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig.csv") %>% dplyr::select(-X) %>% 
+  separate(Loc, c("scaffold", "position"), sep = " ", remove=FALSE) %>%
+  mutate(position = as.numeric(position),
+         position = position+1,
+         scaffold = str_after_nth(scaffold, "\\|", 2)
+         )
+
+df <- full_join(significance, glocation, by = c("Loc", "scaffold", "position")) %>% full_join(., gfunction) %>% arrange((p.value))
+
+df %>% write.csv("/projects/gmgi/Fisheries/epiage/haddock/90p_summary.csv")
+```
+
+

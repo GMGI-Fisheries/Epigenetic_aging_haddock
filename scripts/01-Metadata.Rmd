@@ -115,7 +115,7 @@ fall2023 <- read_excel("data/00_metadata/age data/Fall2023_haddock_finclips_aged
 
 nrow(fall2023) # 108 entries 
 
-spring2024 <- read_excel("data/00_metadata/age data/Spring2024_sampling.xlsx", skip=1,
+spring2024 <- read_excel("data/00_metadata/Spring2024_sampling.xlsx", skip=1,
                       col_types = c("text", "text", "text", "date", "numeric", "numeric",
                                      "text", "text", "numeric", "numeric", "text", "text", "text"),
                        col_names = c("Operation Id", "Stratum", "Tow", "Operation Date",
@@ -419,8 +419,11 @@ data %>% write_xlsx("data/00_metadata/full_finclips_sampling.xlsx")
 ## Import sequencing sample IDs 
 
 ```{r}
-sequencing <- read_xlsx("C:/BoxDrive/Box/Science/Fisheries/Projects/Epigenetic Aging/Haddock/Labwork/Haddock_labwork.xlsx", 
+data <- read_xlsx("data/00_metadata/full_finclips_sampling.xlsx")
+sequencing <- read_xlsx("C:/BoxDrive/Box/Science/Fisheries/Projects/Epigenetic Aging/_Haddock/Labwork/Haddock_labwork.xlsx", 
                         sheet = "Sample List") %>% dplyr::select(GMGI_ID, `Seq Rnd`) %>% left_join(., data, by = "GMGI_ID")
+
+sequencing %>% write_xlsx("data/00_metadata/sequencing_metadata.xlsx")
 ```
 
 

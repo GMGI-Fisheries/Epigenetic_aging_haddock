@@ -1,0 +1,103 @@
+---
+title: "TEMPLATE FOR PUBLIC USE: EPICLOCK FOR HADDOCK"
+author: "Authors: Emma Strand; emma.strand@gmgi.org"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+*Done on server RStudio* 
+
+Load libraries
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(glmnet)   # for generalized linear models
+library(readxl)
+library(ggpubr)
+```
+
+Load clock data 
+
+```{r}
+### OLD NAMES
+# load("../modelplots/5-7-2025_5_Lassox7_alpha0.02x650x500/5-7-2025_5_elastic_results_59.RData")
+# load("../modelplots/5-7-2025_5_Lassox7_alpha0.02x650x500/5-7-2025_5_lasso_processed_sample_59.RData")
+
+load("Final_model_to_use_elastic_results.RData")
+load("Final_model_to_use_lasso_processed.RData")
+
+## 1,263 information for this set
+filtered_training_matrix <- sample_obj$training
+filtered_testing_matrix <- sample_obj$testing
+n_sites <- sample_obj$n_sites
+
+all_mae_train <- sample_obj_elastic$all_mae_train
+all_mae_test <- sample_obj_elastic$all_mae_test
+all_r2_train <- sample_obj_elastic$all_r2_train
+all_r2_test <- sample_obj_elastic$all_r2_test
+all_sites_chosen <- sample_obj_elastic$all_sites_chosen 
+all_models <- sample_obj_elastic$all_models 
+all_subsets <- sample_obj_elastic$all_subsets
+
+best_model <- sample_obj_elastic$best_model 
+best_selected <- sample_obj_elastic$best_selected 
+best_subset <- sample_obj_elastic$best_input 
+best_r2_test <- sample_obj_elastic$best_r2_test 
+best_mae_test <- sample_obj_elastic$best_mae_test 
+best_iteration <- sample_obj_elastic$best_iteration 
+```
+
+Load GMGI training and testing information
+
+```{r}
+# Code to produce predictions 
+
+  # Subset matrices based on best subset
+  best_training_subset <- filtered_training_matrix[, best_subset]
+  best_testing_subset <- filtered_testing_matrix[, best_subset]
+  
+  ## Training models
+  predicted_age <- as.data.frame(predict(best_model, newx = best_training_subset, s = "lambda.min")) %>% 
+    rownames_to_column(var = "GMGI_ID") %>% 
+    dplyr::rename(epi.age = lambda.min)
+  
+  predicted_age_testing <- as.data.frame(predict(best_model, newx = best_testing_subset, s = "lambda.min")) %>% 
+    rownames_to_column(var = "GMGI_ID") %>% 
+    dplyr::rename(epi.age = lambda.min)
+
+  ## Train and testing group labels
+  predicted_age$group <- "training"
+  predicted_age_testing$group <- "testing"
+  
+  predictions <- full_join(predicted_age, predicted_age_testing, by = join_by(GMGI_ID, epi.age, group)) %>%
+    left_join(., meta, by = "GMGI_ID") %>%
+    mutate(epi.age = pmax(epi.age, 0))
+```
+
+Load new user data 
+
+Loc names need to be the same format names
+
+```{r}
+new_data <- ###
+  
+new_predicted_values <- as.data.frame(predict(best_model, newx = best_testing_subset, s = "lambda.min")) %>% 
+    rownames_to_column(var = "GMGI_ID") %>% 
+    dplyr::rename(epi.age = lambda.min)
+  
+```
+
+
+
+
+
+
