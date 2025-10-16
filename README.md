@@ -1,7 +1,7 @@
 # Epigenetic Aging: Haddock, Melanogrammus aeglefinus
 Development of a method to age fish using the 'epigenetic clock' theory. 
 
-[Abstract - insert final version]
+Age-based population models are a gold standard approach to estimate stock size and sustainable catch recommendations for effective fisheries management. Traditional ageing by counting annuli on their ear stones (otoliths), is labor-intensive, lethal, and can be inaccurate for long-lived fishes. In this study, we present an accurate, non-lethal epigenetic clock method for predicting age in haddock, Melanogrammus aeglefinus, one of the most valuable commercial fisheries in the north Atlantic Ocean. Pectoral fin tissue (n=140 individuals) was collected during Fall 2022 and Spring 2023 bottom trawl surveys in the Georges Bank-Gulf of Maine region, and whole-genome bisulfite sequencing was conducted to measure CpG loci DNA methylation levels. The most age-predictive loci were identified using a three-step modeling approach: a Bayesian generalized linear mixed model with length and sex as random factors followed by machine learning models with a 70/30 train-test split. The final model used 111 loci to predict age within 1-year at 93% accuracy. Hypo- and hyper-methylated age-related loci were found throughout the genome and were enriched in intragenic regions with functions related to immunity, transcriptional regulation, and signal transduction. This study provides an accurate, cost-effective, and scalable epigenetic tool for fisheries management to predict the age of haddock. 
 
 ![](https://github.com/GMGI-Fisheries/Epigenetic_aging_haddock/blob/main/manuscript%20figures/Figure1_sampling_scheme.png?raw=true)
 
