@@ -54,10 +54,10 @@ library(glmnetUtils)
 # Load data 
 
 ```{r}
-under96BC <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/conversion_eff/under96.xlsx")
+under96BC <- read_xlsx("/projects/gmgi/Fisheries/epiage/haddock/conversion_eff/under96.xlsx")
 
 ## adding metadata 
-meta <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.xlsx", 
+meta <- read_xlsx("/projects/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.xlsx", 
                   sheet = "Sample List") %>% 
   dplyr::select(GMGI_ID, Length, Sex, AgeRounded, Season) %>%
   filter(!GMGI_ID %in% under96BC$GMGI_ID) # %>%
@@ -78,10 +78,10 @@ meta <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.
 ```
 
 ```{r}
-load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final.RData")
+load("/projects/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final-3-24-2026.RData")
 
 ## 90% df4 age and age + length from 19-Missing values script 
-load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
+load("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data-3-24-2026.RData")
 df_f4_agelength_imputed <- results1 %>% rownames_to_column(var = "Loc") %>%
   gather("GMGI_ID", "percent.meth", 2:last_col()) %>%
   left_join(., meta, by = "GMGI_ID")
@@ -90,7 +90,7 @@ sig_values <-
   # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_AL_sig.csv") %>% 
   # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_sig.csv") %>%
   # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_sig.csv") %>%
-  read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig.csv") %>%
+  read.csv("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig-3-24-2026.csv") %>%
   dplyr::select(-X) %>%
   arrange(p.value) %>%
   slice_head(prop = 0.20) %>%
@@ -104,12 +104,12 @@ sig_values <-
 
 ```{r}
 df <- 
-  # df_f4_agelength_imputed %>%
-  # dplyr::select(-Length, -Sex, -Season)  %>%
+  df_f4_agelength_imputed %>%
+  dplyr::select(-Length, -Sex, -Season)  %>%
   
-  df100_f4_agelength_final %>%
-  dplyr::select(-`Length Cm`, -`Ind Sex`, -sampling_season) %>%
-  dplyr::rename(GMGI_ID = sample) %>%
+  # df100_f4_agelength_final %>%
+  # dplyr::select(-`Length Cm`, -`Ind Sex`, -sampling_season) %>%
+  # dplyr::rename(GMGI_ID = sample) %>%
   
   filter(!GMGI_ID %in% under96BC$GMGI_ID) # %>%
   
@@ -130,7 +130,8 @@ df <-
 ## filter for top % most significant sites
 # df <- df %>% filter(Loc %in% sig_values$Loc)
 length(unique(df$Loc)) 
-## 9,474 loci
+## 9,474 loci (40,251 90% 3-25-2026)
+## 4,630 loci (100% 3-25-2026)
 
 ## REMOVE OR SUBSET TO HIGHLY CORRELATED SITES
 # df_wide <- df %>% spread(Loc, percent.meth)

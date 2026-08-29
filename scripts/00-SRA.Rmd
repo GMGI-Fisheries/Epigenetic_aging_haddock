@@ -1,0 +1,51 @@
+---
+title: "00-SRA"
+output: html_document
+date: "2026-08-29"
+---
+
+## libraries
+
+```{r}
+library(tidyverse)
+library(strex)
+library(writexl)
+```
+
+## sample list 
+
+```{r}
+rawdata1 <- read.delim2("data/01_QC/rawdata_list_sequencing_round1", header=F) %>%
+  mutate(V1=gsub("/work/gmgi/Fisheries/epiage/haddock/raw_data/","", V1))
+
+rawdata2 <- read.delim2("data/01_QC/rawdata_list_sequencing_round2", header=F) %>%
+  mutate(V1=gsub("/work/gmgi/Fisheries/epiage/haddock/raw_data2/","", V1))
+
+rawdata_list <- full_join(rawdata1, rawdata2) %>%
+  mutate(
+    Sample = sub("_R[12]_.*", "", V1),
+    sample_name = sub("_S[0-9]+$", "", Sample),
+    Read = ifelse(grepl("_R1_", V1), "R1", "R2")
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = Read,
+    values_from = V1
+  )
+```
+
+## order of SRA
+
+```{r}
+sra <- read.delim2("NCBI_Biosample_attributes.tsv") %>%
+  dplyr::select(accession, sample_name)
+
+to_upload <- sra %>% left_join(., rawdata_list) %>% dplyr::select(-Sample)
+
+to_upload %>% write_xlsx("SRA_filenames.xlsx")
+```
+
+
+
+
+
+

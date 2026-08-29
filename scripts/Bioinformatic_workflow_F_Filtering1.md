@@ -40,7 +40,8 @@ done
 
 ```
 
-`wc -l /work/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/*10x_sorted.tab > 10X_sample_depth2.txt` 
+`wc -l /projects/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/*10x_sorted.tab > 10X_sample_depth2.txt` 
+`wc -l /projects/gmgi/Fisheries/epiage/haddock/methylation/filtered/10X_files/*10x_sorted.tab > 10X_line_counts.txt` 
 
 `head 10X_sample_depth2.txt` (with all 140 samples): 
 

@@ -1,0 +1,218 @@
+---
+title: "STRINGplots"
+output: html_document
+date: "2026-08-11"
+---
+
+## Libraries
+
+```{r}
+library(tidyverse)
+library(scales)
+library(igraph)
+library(ggnewscale)
+library(scales)
+```
+
+## Data
+
+```{r}
+cluster1 <- read.delim("data/06_genomic_function/STRING_output/90p_cluster1_0.8similarity.tsv", 
+                                header = TRUE, sep = "\t", stringsAsFactors = FALSE, check.names = FALSE) 
+
+unique(cluster1$`#category`)
+
+cluster2 <- read.delim("data/06_genomic_function/STRING_output/90p_cluster2_0.8similarity.tsv", 
+                                header = TRUE, sep = "\t", stringsAsFactors = FALSE, check.names = FALSE) 
+
+cluster1_sub <- read.delim("data/06_genomic_function/STRING_output/90p_cluster1_sub-network1_0.8similarity.tsv", 
+                                header = TRUE, sep = "\t", stringsAsFactors = FALSE, check.names = FALSE) 
+
+cluster2_sub <- read.delim("data/06_genomic_function/STRING_output/90p_cluster2_sub-network1_0.8similarity.tsv", 
+                                header = TRUE, sep = "\t", stringsAsFactors = FALSE, check.names = FALSE) 
+
+### CHOICES 
+category <- "GO Process"
+category_name <- "GO Biological Process"
+df_name <- "cluster1_subnetwork"
+df <- cluster1_sub
+similarity_cutoff <- 0.6
+```
+
+## Calculating similarity groups 
+
+```{r}
+cluster_to_plot <- df %>%
+  subset(`#category` == category)
+
+protein_sets <- strsplit(
+  cluster_to_plot$`matching proteins in your network (IDs)`,
+  ",",
+  fixed = TRUE
+)
+
+names(protein_sets) <- cluster_to_plot$`term ID`
+
+jaccard <- function(a, b) {
+  intersection <- length(intersect(a, b))
+  union <- length(union(a, b))
+  intersection / union
+}
+
+n <- nrow(cluster_to_plot)
+
+jac <- matrix(0, nrow = n, ncol = n, dimnames = list(cluster_to_plot$`term ID`, cluster_to_plot$`term ID`))
+
+for (i in seq_len(n)) {
+  for (j in seq_len(n)) {
+    jac[i, j] <- jaccard( protein_sets[[i]], protein_sets[[j]])
+  }
+}
+
+# Look at matrix
+round(jac, 2)
+
+edges <- which(
+  jac >= similarity_cutoff &
+    upper.tri(jac),
+  arr.ind = TRUE
+)
+
+edges_df <- data.frame(
+  from = rownames(jac)[edges[, 1]],
+  to   = colnames(jac)[edges[, 2]],
+  similarity = jac[edges]
+)
+
+edges_df
+
+vertices <- data.frame(name = cluster_to_plot$`term ID`)
+
+g <- graph_from_data_frame(edges_df, directed = FALSE, vertices = vertices)
+
+# Connected components
+clusters <- components(g)$membership
+
+cluster_df <- data.frame(
+  `term ID` = names(clusters),
+  similarity_group = as.integer(clusters),
+  check.names = FALSE
+)
+
+cluster_to_plot <- cluster_to_plot %>%
+  left_join(cluster_df, by = "term ID")
+
+cluster_to_plot %>%
+  select(`term ID`, `term description`, `observed gene count`, signal, `false discovery rate`, similarity_group)
+```
+
+Re-ordering based on strongest pathways 
+
+```{r}
+group_order <- cluster_to_plot %>%
+  group_by(similarity_group) %>%
+  summarise(
+    max_signal = max(signal, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(max_signal)) %>%
+  mutate(new_group = row_number())
+
+cluster_to_plot <- cluster_to_plot %>%
+  left_join(group_order, by = "similarity_group") %>%
+  mutate(similarity_group = new_group) %>%
+  select(-new_group, -max_signal) %>%
+  
+  ## Order pathways for plotting
+  ##Groups remain together, with larger signal toward the top.
+  arrange(similarity_group, signal) %>%
+  mutate(pathway = factor(`term description`, levels = `term description`))
+```
+
+## Plot 
+
+```{r}
+xmin <- min(cluster_to_plot$signal, na.rm = TRUE)
+xmax <- max(cluster_to_plot$signal, na.rm = TRUE)
+
+padding <- (xmax - xmin) * 0.1
+```
+
+```{r}
+cluster_to_plot <- cluster_to_plot %>% slice_max(order_by = signal, n = 20)
+  
+p <- ggplot(cluster_to_plot, aes(y = reorder(pathway, signal))) +
+
+  geom_segment(
+    aes(x = xmin - padding, xend = signal, yend = pathway,
+        color = `false discovery rate`),
+    linewidth = 2.5, alpha=0.5, lineend = "butt"
+  ) +
+
+  geom_point(
+    aes(x = signal, size = `observed gene count`,
+        fill = `false discovery rate`),
+    shape = 21, color = "black", stroke = 0.8
+  ) +
+
+  # Same FDR palette for lines
+  scale_color_gradientn(
+    colors = c("#E6F598", "#ABDDA4", "#66C2A5", "#3288BD", "#313695"),
+    trans = "log10", guide = "none"
+  ) +
+
+  # FDR fill + displayed legend
+  scale_fill_gradientn(
+    colors = c("#E6F598", "#ABDDA4", "#66C2A5", "#3288BD", "#313695"),
+    trans = "log10", name = "FDR",
+    guide = guide_colorbar(
+      title.position = "top",
+      barheight = unit(35, "mm"),
+      barwidth = unit(4, "mm")
+    )
+  ) +
+
+  scale_size_continuous(
+    name = "Gene count",
+    range = c(4, 10),
+    breaks = pretty_breaks(n = 4)
+  ) +
+
+  scale_x_continuous(
+    limits = c(xmin - padding, xmax + padding),
+    breaks = pretty_breaks(n = 6),
+    expand = c(0, 0)
+  ) +
+
+  labs(
+    title = paste(category_name, "enrichment"),
+    subtitle = paste0("Grouped at Jaccard similarity ≥ ", similarity_cutoff),
+    x = "Signal", y = NULL
+  ) +
+  scale_y_discrete(labels = \(x) stringr::str_wrap(x, width = 35)) +
+
+  theme_minimal(base_size = 10) +
+
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(
+      colour = "grey85", linewidth = 0.4, linetype = "dashed"
+    ),
+    axis.text.y = element_text(colour = "black", size = 10),
+    axis.text.x = element_text(colour = "black", size = 9),
+    axis.title.x = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5, size = 12, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 9, colour = "grey35"),
+    legend.position = "right",
+    legend.title = element_text(size = 9),
+    legend.text = element_text(size = 8)
+  )
+
+p
+
+ggsave(paste0("manuscript figures/Figure4_", df_name, "_", category, "_enrichment.png"),
+       plot = p, width = 7, height = 8, dpi = 600)
+```
+
+

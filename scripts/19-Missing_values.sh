@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --error="%x_error.%j" #if your job fails, the error report will be put in this file
-#SBATCH --output="%x_output.%j" #once your job is completed, any final job report comments will be put in this file
+#SBATCH --error=output/"%x_error.%j" #if your job fails, the error report will be put in this file
+#SBATCH --output=output/"%x_output.%j" #once your job is completed, any final job report comments will be put in this file
 #SBATCH --partition=short
 #SBATCH --nodes=1
 #SBATCH --time=24:00:00
@@ -11,7 +11,8 @@
 
 # module load R/4.4.0
 
-module load anaconda3/2022.05
-source activate /home/e.strand/.conda/envs/Env_R_v2
+#module load anaconda3/2022.05
+#source activate /home/e.strand/.conda/envs/Env_R_v2
+source activate /projects/gmgi/miniconda3/envs/R_env
 
-Rscript /work/gmgi/Fisheries/epiage/haddock/scripts/19-Missing_values.R
+Rscript /projects/gmgi/Fisheries/epiage/haddock/scripts/19-Missing_values.R

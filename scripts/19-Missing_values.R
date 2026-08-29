@@ -1,6 +1,14 @@
 #### 19 Impute missing values 
 
 ### Load packages 
+### 3-24-2026 NU Explorer: (one big line was killed every time I tried it)
+### source activate /projects/gmgi/miniconda3/envs/R_env
+### conda install -c conda-forge r-mice 
+### conda install -c conda-forge r-emmeans 
+### conda install -c conda-forge r-rstanarm 
+### conda install -c conda-forge r-coda  
+### conda install -c conda-forge r-tidymodels 
+### conda install -c conda-forge r-caret
 
 library(tidyverse)
 library(mice)
@@ -18,11 +26,11 @@ set.seed(123)
 num_cores <- detectCores() - 1
 
 ######### Load data 
-load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_final.RData")
-load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_final.RData")
+load("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_final-7-05-2026.RData")
+load("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_final-7-05-2026.RData")
 
-length(unique(df_f4_agelength_final$Loc)) ## 47,373
-length(unique(df_f4_age_final$Loc)) ## 124,836
+length(unique(df_f4_agelength_final$Loc)) ## 47,373; 40,251; 67,841 (7-5-2026)
+length(unique(df_f4_age_final$Loc)) ## 124,836; 66,191; 121,319 (7-5-2026)
 ######### 
 
 
@@ -106,7 +114,7 @@ complete_datas_1 <- mclapply(split_dfs1, run_MICE_model, mc.cores = num_cores)
 # Combine the results
 results1 <- do.call(rbind, complete_datas_1)
 
-save(results1, file = "/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
+save(results1, file = "/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data-3-24-2026.RData")
 #########  
 
 
@@ -127,7 +135,7 @@ complete_datas_2 <- mclapply(split_dfs2, run_MICE_model, mc.cores = num_cores)
 # Combine the results
 results2 <- do.call(rbind, complete_datas_2)
 
-save(results2, file = "/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_imputed_data.RData")
+save(results2, file = "/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_imputed_data-3-24-2026.RData")
 #########  
 
 

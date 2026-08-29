@@ -54,8 +54,10 @@ library(glmnetUtils)
 # Load data 
 
 ```{r}
+under96BC <- read_xlsx("/projects/gmgi/Fisheries/epiage/haddock/conversion_eff/under96.xlsx")
+
 ## adding metadata 
-meta <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.xlsx", 
+meta <- read_xlsx("/projects/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.xlsx", 
                   sheet = "Sample List") %>% 
   dplyr::select(GMGI_ID, Length, Sex, AgeRounded, Season) %>%
   filter(!GMGI_ID %in% under96BC$GMGI_ID)
@@ -66,7 +68,6 @@ meta <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.
   # filter(!GMGI_ID=="Mae-500") %>%
   # filter(!GMGI_ID=="Mae-299")
 
-under96BC <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/conversion_eff/under96.xlsx")
 ```
 
 
@@ -84,7 +85,7 @@ load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_
 load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final.RData")
 
 ## 90% df4 age and age + length from 19-Missing values script 
-load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
+load("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
 df_f4_agelength_imputed <- results1 %>% rownames_to_column(var = "Loc") %>%
   gather("GMGI_ID", "percent.meth", 2:last_col()) %>%
   left_join(., meta, by = "GMGI_ID")
@@ -93,7 +94,7 @@ sig_values <-
   # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_AL_sig.csv") %>% 
   # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_sig.csv") %>%
   # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_sig.csv") %>%
-  read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig.csv") %>%
+  read.csv("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig.csv") %>%
   dplyr::select(-X) %>%
   arrange(p.value) %>%
   slice_head(prop = 0.20) %>%

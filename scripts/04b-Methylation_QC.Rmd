@@ -64,7 +64,7 @@ Bring in metadata to combine with ecoli and wgbs data
 
 ```{r}
 metadata <- read_xlsx("data/00_metadata/full_finclips_sampling.xlsx")
-labwork <- read_xlsx("C:/BoxDrive/Box/Science/Fisheries/Projects/Epigenetic Aging/Haddock/Labwork/Haddock_labwork.xlsx", sheet = "Sample List") %>% dplyr::select(GMGI_ID, `Seq Rnd`)
+labwork <- read_xlsx("C:/BoxDrive/Box/Science/Fisheries/Projects/Epigenetic Aging/_Haddock/Labwork/Haddock_labwork.xlsx", sheet = "Sample List") %>% dplyr::select(GMGI_ID, `Seq Rnd`)
 metadata <- full_join(metadata, labwork, by="GMGI_ID")
 
 data <- right_join(metadata, ecoli, by="GMGI_ID") 
@@ -74,6 +74,21 @@ WGBS_data$`Seq Rnd` <- as.character(WGBS_data$`Seq Rnd`)
 
 data$`Seq Rnd` <- as.character(data$`Seq Rnd`)
 ```
+
+## Statistics 
+
+```{r}
+t.test(data$`Aligned (%)` ~ data$`Seq Rnd`)
+t.test(data$`Conversion Efficiency (%)` ~ data$`Seq Rnd`)
+
+t.test(WGBS_data$`mCpG (%)` ~ data$`Seq Rnd`)
+t.test(WGBS_data$`mCHG (%)` ~ data$`Seq Rnd`)
+t.test(WGBS_data$`mCHH (%)` ~ data$`Seq Rnd`)
+t.test(WGBS_data$`Cytosines (M)` ~ data$`Seq Rnd`)
+t.test(WGBS_data$`Aligned (%)` ~ data$`Seq Rnd`)
+t.test(WGBS_data$`Duplicates (%)` ~ data$`Seq Rnd`)
+```
+
 
 
 ## Bisulfite Conversion 
@@ -143,4 +158,31 @@ WGBS_data %>% dplyr::select(GMGI_ID, `Seq Rnd`, `mCpG (%)`, `mCHG (%)`,
 
 ggsave("data/01_QC/Bismark_quality_control.png", width=7, height=5)
 ```
+
+
+### Coverage vs. 10x per site filter 
+
+```{r}
+depth <- read.delim2("data/01_QC/10X_sample_depth2.txt", sep = " ", header=F) %>% 
+  dplyr::select(CpGs=V5, path=V6) %>%
+   mutate(sample = str_before_first(path, "_S"),
+          sample = str_after_first(sample, "files/"),
+          CpGs = as.numeric(CpGs))
+
+total_depth <- read_xlsx("data/01_QC/sequencing statistics.xlsx") %>%
+  mutate(coverage = (`M Seqs`*2*10^6*150)/(652.8*10^6) ) %>%
+  arrange(desc(coverage)) %>%
+  mutate(sample = str_before_first(`Sample Name`, "_"))
+
+depth_df <- depth %>% dplyr::select(-path) %>% full_join(., total_depth %>% dplyr::select(sample, coverage))
+
+depth_df %>%
+  ggplot(., aes(x=coverage, y=CpGs)) + 
+  geom_point() + 
+  theme_bw()
+```
+
+
+
+
 

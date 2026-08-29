@@ -3,6 +3,15 @@
 ##### Slurm script version of 20-Age_prediction_bootstrap.Rmd
 ### But do this for 10k iterations of the best model 
 
+### /projects/gmgi/miniconda3/envs/R_env
+### conda install -c conda-forge r-car
+### conda install -c conda-forge r-ggpubr
+### conda install -c conda-forge r-psych
+### conda install -c conda-forge r-bestNormalize
+### conda install -c conda-forge r-glmnetUtils
+### conda install -c conda-forge r-parallelly
+### other packages were aleady installed
+
 ## clear environment 
 rm(list=ls())
 
@@ -26,6 +35,7 @@ library(rstanarm) # for Bayesian models (xxx)
 library(coda)     # for Markov chain Monte Carlo diagnostics (xxx)
 # library(parallel) # for parallel processing (xxx)
 library(glmnetUtils) # (xxx)
+library(parallelly)
 
 # Note: tidyverse includes tidyr, readr, purrr, and other packages.
 #       Loading tidyverse reduces the need to load these individually.
@@ -33,10 +43,10 @@ library(glmnetUtils) # (xxx)
 
 
 ##### Load data 
-under96BC <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/conversion_eff/under96.xlsx")
+under96BC <- read_xlsx("/projects/gmgi/Fisheries/epiage/haddock/conversion_eff/under96.xlsx")
 
 ## adding metadata 
-meta <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.xlsx", 
+meta <- read_xlsx("/projects/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.xlsx", 
                   sheet = "Sample List") %>% 
   dplyr::select(GMGI_ID, Length, Sex, AgeRounded, Season) %>%
   filter(!GMGI_ID %in% under96BC$GMGI_ID) # %>%
@@ -51,16 +61,19 @@ meta <- read_xlsx("/work/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.
 # filter(!GMGI_ID=="Mae-299")
 
 ## 90% df4 age and age + length from 19-Missing values script 
-load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
+load("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data-3-24-2026.RData")
 df_f4_agelength_imputed <- results1 %>% rownames_to_column(var = "Loc") %>%
   gather("GMGI_ID", "percent.meth", 2:last_col()) %>%
   left_join(., meta, by = "GMGI_ID")
+
+length(unique(df_f4_agelength_imputed$Loc)) ## 40,251 CpGs 
+df_f4_agelength_imputed %>% filter(is.na(percent.meth))
 
 sig_values <- 
   # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_AL_sig.csv") %>% 
   # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_sig.csv") %>%
   # read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_sig.csv") %>%
-  read.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig.csv") %>%
+  read.csv("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig-3-24-2026.csv") %>%
   dplyr::select(-X) %>%
   arrange(p.value) %>%
   slice_head(prop = 0.20) %>%
@@ -90,6 +103,7 @@ df <- df_f4_agelength_imputed %>%
 df <- df %>% filter(Loc %in% sig_values$Loc)
 length(unique(df$Loc)) 
 ## 9,474 loci
+## 8,050 loci 3-25-2026 
 
 ## REMOVE OR SUBSET TO HIGHLY CORRELATED SITES
 df_wide <- df %>% spread(Loc, percent.meth)
@@ -111,6 +125,8 @@ length(unique(df$Loc))
 ## 9,474 loci
 ## 2,369 loci w/ 0.75 corr filtering
 ## 4,737 loci w/ 0.5 corr filtering
+
+## 8,050
 
 ##########################
 
@@ -227,7 +243,7 @@ for (i in 1:100) {
   sample_obj <- lasso_processed_samples[[i]]
   
   # Create a filename with the current index
-  save_filename <- paste0("/work/gmgi/Fisheries/epiage/haddock/modelplots/10k/4-16-2025_1_lasso_processed_sample_", i, ".RData")
+  save_filename <- paste0("/projects/gmgi/Fisheries/epiage/haddock/modelplots_2026/10k/3-25-2026_1_lasso_processed_sample_", i, ".RData")
   
   # Save the object
   save(sample_obj, file = save_filename)
@@ -335,7 +351,7 @@ for (i in 1:100) {
   sample_obj_elastic <- elastic_results[[i]]
   
   # Create a filename with the current index
-  save_filename_elastic <- paste0("/work/gmgi/Fisheries/epiage/haddock/modelplots/10k/4-16-2025_1_elastic_results_", i, ".RData")
+  save_filename_elastic <- paste0("/projects/gmgi/Fisheries/epiage/haddock/modelplots_2026/10k/3-25-2026_1_elastic_results_", i, ".RData")
   
   # Save the object
   save(sample_obj_elastic, file = save_filename_elastic)
@@ -431,7 +447,7 @@ for (i in seq_along(elastic_results)) {
              hjust=0,vjust=1,label.size=NA,color="black",size=6,fill=NA)
   
   ## Save plot (optional)
-  ggsave(filename=paste0("/work/gmgi/Fisheries/epiage/haddock/modelplots/10k/4-16-2025_1_Lassox7_lasso150by10000_bootstrap_",
+  ggsave(filename=paste0("/projects/gmgi/Fisheries/epiage/haddock/modelplots_2026/10k/3-25-2026_1_Lassox7_lasso150by10000_bootstrap_",
                          i, "_plot.png"), plot=plot, width=7, height=5.5)
 }
 

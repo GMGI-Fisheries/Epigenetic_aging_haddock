@@ -1,0 +1,143 @@
+---
+title: "2026-07-09_PCA"
+output: html_document
+date: "2026-07-09"
+---
+
+```{r}
+library(tidyverse)
+library(vegan)
+library(readxl)
+library(ggrepel)
+```
+
+# Load methylation matrix
+```{r}
+load("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data-7-05-2026.RData")
+under96BC <- read_xlsx("/projects/gmgi/Fisheries/epiage/haddock/conversion_eff/under96.xlsx")
+
+meta <- read_xlsx(
+  "/projects/gmgi/Fisheries/epiage/haddock/metadata/Haddock_labwork.xlsx",
+  sheet = "Sample List"
+) %>%
+  dplyr::select(GMGI_ID, Length, Sex, AgeRounded, Season) %>%
+  filter(!GMGI_ID %in% under96BC$GMGI_ID)
+
+sig_values <- read.csv(
+  "/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig-7-05-2026.csv"
+) %>%
+  dplyr::select(-X) %>%
+  arrange(p.value) %>%
+  slice_head(prop = 0.05) %>%
+  mutate(
+    Loc = gsub(" ", "_", Loc),
+    Loc = gsub("\\|", "_", Loc)
+  )
+```
+
+```{r}
+df <- results1 %>%
+  rownames_to_column(var = "Loc") %>%
+  gather("GMGI_ID", "percent.meth", 2:last_col()) %>%
+  left_join(., meta) %>%
+  #df_f4_agelength_imputed %>%
+  #dplyr::select(-Length, -Sex, -Season) %>%
+  filter(!GMGI_ID %in% under96BC$GMGI_ID) %>%
+  filter(Loc %in% sig_values$Loc)
+```
+
+# Save metadata
+```{r}
+meta <- df %>% arrange(GMGI_ID) %>%
+  dplyr::select(GMGI_ID, AgeRounded, Length, Sex, Season) %>% distinct()
+```
+
+# Methylation matrix only
+```{r}
+meth_mat <- df %>% spread(Loc, percent.meth) %>% arrange(GMGI_ID) %>%
+  dplyr::select(-GMGI_ID, -AgeRounded, -Length, -Sex, -Season) %>% 
+  as.data.frame()
+```
+
+# Make sure CpG columns are numeric
+```{r}
+meth_mat <- meth_mat %>%
+  mutate(across(everything(), as.numeric))
+```
+
+# Remove CpGs with no variance
+```{r}
+meth_mat <- meth_mat[, apply(meth_mat, 2, var, na.rm = TRUE) > 0]
+```
+
+# Remove rows with remaining missing values, if any
+```{r}
+keep_rows <- complete.cases(meth_mat)
+
+meth_mat <- meth_mat[keep_rows, ]
+meta <- meta[keep_rows, ]
+```
+
+# Bray-Curtis distance is common for beta-diversity-like methylation profiles
+```{r}
+dist_mat <- vegdist(meth_mat, method = "bray")
+```
+
+# PCoA
+```{r}
+pcoa <- cmdscale(dist_mat, eig = TRUE, k = 2)
+
+var_explained <- round(100 * pcoa$eig / sum(pcoa$eig[pcoa$eig > 0]), 2)
+
+pcoa_df <- data.frame(
+  GMGI_ID = meta$GMGI_ID,
+  Age = as.factor(meta$Age),
+  Season = as.factor(meta$Season),
+  Sex = as.factor(meta$Sex),
+  PCoA1 = pcoa$points[, 1],
+  PCoA2 = pcoa$points[, 2]
+)
+```
+
+
+# Plot
+```{r}
+p <- ggplot(pcoa_df, aes(x = PCoA1, y = PCoA2, color = Age)) +
+  geom_point(size = 3, alpha = 0.85) +
+  geom_text_repel(
+    data = subset(pcoa_df, PCoA2 > 0.03),
+    aes(label = GMGI_ID),
+    color = "black",
+    size = 3,
+    show.legend = FALSE
+  ) +
+  #stat_ellipse(aes(group = Age), linewidth = 0.8, alpha = 0.4) +
+  theme_bw() +
+  labs(
+    x = paste0("PCoA1 (", var_explained[1], "%)"),
+    y = paste0("PCoA2 (", var_explained[2], "%)"),
+    color = "Age",
+    title = "PCoA of DNA methylation from top 5% significant CpG "
+  ) +
+  guides(color = guide_legend(ncol = 2)) +
+  theme(
+    axis.title = element_text(size = 13, face = "bold"),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 12)
+  )
+
+print(p)
+# 
+# ggsave(
+#   filename = "haddock_methylation_PCoA_by_age.png",
+#   plot = p,
+#   width = 8,
+#   height = 6,
+#   dpi = 300
+# )
+# 
+# write.csv(pcoa_df, "haddock_methylation_PCoA_coordinates_by_age.csv", row.names = FALSE)
+```
+
+

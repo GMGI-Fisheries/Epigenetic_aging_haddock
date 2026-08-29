@@ -110,7 +110,9 @@ fall2023_sample_list <- read_excel("data/00_metadata/Fall2023_sampling.xlsx") %>
 fall2023 <- read_excel("data/00_metadata/age data/Fall2023_haddock_finclips_aged.xlsx") %>%
   filter(`Organism Id` %in% fall2023_sample_list$ORGANISM_ID) %>%
   mutate(
-    AgeRounded = Age+0.65
+    AgeRounded = Age+0.65,
+    Stratum=as.character(Stratum),
+    `Organism Id`=as.character(`Organism Id`)
   )
 
 nrow(fall2023) # 108 entries 
@@ -567,7 +569,7 @@ Metadata file needed for methylseq pipeline. Methylseq requires you to rename yo
 ### Demographic information
 
 ```{r}
-data_demographics <- data %>% mutate(AgeRounded = as.factor(AgeRounded)) %>% 
+data_demographics <- data %>% mutate(AgeRounded = as.factor(AgeRounded)) %>% dplyr::select(-Sex) %>%
   dplyr::rename(Sex=`Ind Sex`, Weight=`Weight Kg`, Length=`Length Cm`) %>%
   filter(!is.na(Sex))
 
@@ -579,7 +581,61 @@ summarySE(
 
 ```
 
+### Statistics 
+
+1. Length w/ age, sex, season   
+2. Weight w /age, sex, season
+
+test whether length differs by sex while accounting for age
+
+```{r}
+library(mgcv)
+
+stats_df <- data %>% filter(!is.na(`Ind Sex`)) %>% filter(!is.na(`Length Cm`)) %>% filter(!is.na(`Weight Kg`)) %>% ##421
+  dplyr::select(Trawl_ID, Length=`Length Cm`, Weight=`Weight Kg`, Sex=`Ind Sex`, AgeRounded, 
+                Latitude=`Latitude Dec`, Longitude=`Longitude Dec`, AgeRounded)
+
+## s(variable) allows that variable to have a non-linear curve
+## REML = restricted maximum likelihood - determine how smooth the curve should be / default choice 
+length_mod <- gam(Length ~ Sex + s(AgeRounded), data = stats_df, method = "REML")
+summary(length_mod)
+
+weight_mod <- gam(Weight ~ Sex + s(AgeRounded), data = stats_df, method = "REML")
+summary(weight_mod)
+```
 
 
+
+```{r}
+sequencing_stats <- sequencing %>% dplyr::rename(Lat=`Latitude Dec`, Long=`Longitude Dec`)
+
+gam_age <- gam(
+  AgeRounded ~ s(Lat, Long),
+  data = sequencing_stats,
+  method = "REML"
+)
+
+summary(gam_age)
+```
+
+
+```{r}
+sequencing %>% 
+  ggplot(aes(x = `Longitude Dec`, y = `Latitude Dec`)) +
+  
+  geom_point(
+    data = sequencing %>% select(-AgeRounded),
+    color = "grey80",
+    size = 1
+  ) +
+  
+  geom_point(aes(fill = AgeRounded),
+             shape = 21, size = 2) +
+  
+  facet_wrap(~ AgeRounded) +
+  theme_bw()
+
+ggsave("data/02_catch_data/age_by_location.png", width=9, height=6.5)
+```
 
 

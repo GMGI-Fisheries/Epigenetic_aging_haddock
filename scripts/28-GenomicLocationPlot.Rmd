@@ -26,13 +26,13 @@ library(ggpubr)
 Load data 
 
 ```{r}
-location90p <- read.csv("data/05_genomic_location/90p_genomiclocation.csv")
-location100p <- read.csv("data/05_genomic_location/100p_genomiclocation.csv")
-clock_location <- read.csv("data/05_genomic_location/clock_genomiclocation.csv")
+location90p <- read.csv("data/05_genomic_location/90p_genomiclocation-8-7-2026.csv")
+location100p <- read.csv("data/05_genomic_location/100p_genomiclocation-8-7-2026.csv")
+clock_location <- read.csv("data/05_genomic_location/clock_genomiclocation-8-7-2026.csv")
 
-scaffold_full <- read.csv("data/05_genomic_location/scaffold_loci_length_df100_AL.csv")
-scaffold_clock <- read.csv("data/05_genomic_location/scaffold_loci_length_clock.csv")
-scaffold_90p <- read.csv("data/05_genomic_location/scaffold_loci_length_90p.csv")
+scaffold_full <- read.csv("data/05_genomic_location/scaffold_loci_length_100p-8-7-2026.csv")
+#scaffold_clock <- read.csv("data/05_genomic_location/scaff")
+scaffold_90p <- read.csv("data/05_genomic_location/scaffold_loci_length_90p-8-7-2026.csv")
 
 desired_order <- c("Promoter", "Terminator", "Other", "Intron", "CDS", "UTR5", "UTR3")
 ```
@@ -40,11 +40,16 @@ desired_order <- c("Promoter", "Terminator", "Other", "Intron", "CDS", "UTR5", "
 Plot
 
 ```{r}
-full_location %>% mutate(x="x") %>%
-  mutate(Region = factor(Region, levels = desired_order)) %>%
-  ggplot(., aes(x=x, y=Value)) + 
+location100p %>% 
+  group_by(feature_type) %>%
+  reframe(count = n_distinct(Loc)) %>%
+  mutate(feature_type = factor(feature_type, levels = desired_order)) %>%
   
-  geom_bar(stat = "identity", position = "stack", aes(fill=Region), color='grey20') +
+  mutate(x="x") %>%
+  
+  ggplot(., aes(x=x, y=count)) + 
+  
+  geom_bar(stat = "identity", position = "stack", aes(fill=feature_type), color='grey20') +
   labs(
     y="Number of CpG Loci",
     x="",
@@ -52,6 +57,7 @@ full_location %>% mutate(x="x") %>%
   ) +
   scale_fill_manual(values = c("#F3FBEF", "#C2E1C4", "#9CC398", "#caf0f8", "#8ecae6", "#61a5c2", "#0077b6")) +
   theme_bw() +
+  scale_y_continuous(labels = scales::comma) +
   theme(
     axis.text.x = element_blank(),
     legend.position = "right",
@@ -64,17 +70,24 @@ ggsave("manuscript figures/Figure3_genomic100p.png", width=4, height=5)
 
 
 ```{r}
-clock_location %>% mutate(x="x") %>%
-  mutate(Region = factor(Region, levels = desired_order)) %>%
-  ggplot(., aes(x=x, y=Value)) + 
+clock_location %>% 
   
-  geom_bar(stat = "identity", position = "stack", aes(fill=Region), color='grey20') +
+  group_by(feature_type) %>%
+  reframe(count = n_distinct(Loc)) %>%
+  mutate(feature_type = factor(feature_type, levels = desired_order)) %>%
+  
+  mutate(x="x") %>%
+  
+  ggplot(., aes(x=x, y=count)) + 
+  
+  geom_bar(stat = "identity", position = "stack", aes(fill=feature_type), color='grey20') +
   labs(
     y="Number of CpG Loci",
     x="",
     fill=""
   ) +
-  scale_fill_manual(values = c("#F3FBEF", "#C2E1C4", "#9CC398", "#caf0f8", "#8ecae6", "#61a5c2", "#0077b6")) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_fill_manual(values = c("#F3FBEF", "#C2E1C4", "#9CC398", "#8ecae6", "#61a5c2", "#0077b6")) +
   theme_bw() +
   theme(
     axis.text.x = element_blank(),
@@ -88,9 +101,15 @@ ggsave("manuscript figures/Figure3_genomic_clock.png", width=3.75, height=5)
 
 
 ```{r}
-location90p %>% mutate(x="x") %>%
+location90p %>% 
+  
+  group_by(feature_type) %>%
+  reframe(count = n_distinct(Loc)) %>%
   mutate(feature_type = factor(feature_type, levels = desired_order)) %>%
-  ggplot(., aes(x=x, y=Value)) + 
+  
+  mutate(x="x") %>%
+  
+  ggplot(., aes(x=x, y=count)) + 
   
   geom_bar(stat = "identity", position = "stack", aes(fill=feature_type), color='grey20') +
   labs(
@@ -98,6 +117,7 @@ location90p %>% mutate(x="x") %>%
     x="",
     fill=""
   ) +
+  scale_y_continuous(labels = scales::comma) +
   scale_fill_manual(values = c("#F3FBEF", "#C2E1C4", "#9CC398", "#caf0f8", "#8ecae6", "#61a5c2", "#0077b6")) +
   theme_bw() +
   theme(
@@ -123,7 +143,7 @@ scaffold_90p %>%
   ggplot(aes(x = Sequence.Length, y = number_of_loci)) + 
   geom_point(size = 1.5, shape = 21, fill = "grey80", color = "black", alpha = 0.5) +
   labs(
-    y = "Number of CpG loci",
+    y = "Number of age-associated CpG loci",
     x = "Scaffold length (bp)"
   ) +
   scale_x_continuous(expand = expansion(mult = c(0.025, 0.05)),
@@ -133,15 +153,54 @@ scaffold_90p %>%
     axis.ticks.x = element_blank(),
     axis.text.y = element_text(size = 10, color = "black"),
     axis.text.x = element_text(size = 10, color = "black"),
-    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size = 12, face = "bold"),
-    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size = 12, face = "bold")
+    axis.title.y = element_text(margin = margin(t = 0, r = 15, b = 0, l = 0), size = 13),
+    axis.title.x = element_text(margin = margin(t = 15, r = 0, b = 0, l = 0), size = 13)
   )
 
-ggsave("manuscript figures/Figure3_scaffolds.png", width=8, height=5)
+ggsave("manuscript figures/Figure3_scaffolds.png", width=6, height=4)
 ```
 
 
+```{r}
+clock_location %>% separate(Loc, into = c("Scaffold", "Position"), remove=F) %>% dplyr::select(Scaffold) %>%
+  distinct()
+## 100 scaffolds
+```
 
+### Statistics 
+
+```{r}
+clock_location %>% group_by(feature_type) %>%
+  reframe(count = n_distinct(Loc))
+
+clock_genic <- 33+48+2+3
+clock_nongenic <- 22+1
+
+location90p  %>% group_by(feature_type) %>%
+  reframe(count = n_distinct(Loc))
+
+background_genic <- 15595+31848+1212+1307
+background_nongenic <- 843+802+16234
+```
+
+
+```{r}
+tab <- matrix(
+  c(clock_genic,
+    clock_nongenic,
+    background_genic - clock_genic,
+    background_nongenic - clock_nongenic),
+  nrow = 2,
+  byrow = TRUE
+)
+
+rownames(tab) <- c("Clock", "Background")
+colnames(tab) <- c("Genic", "Non-genic")
+
+tab
+
+chisq.test(tab)
+```
 
 
 

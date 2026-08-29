@@ -27,7 +27,7 @@ library(tidyverse)
 ## Load data 
 
 ```{r}
-load("/work/gmgi/Fisheries/epiage/haddock/RData_Round2/df_all2.RData")
+load("/projects/gmgi/Fisheries/epiage/haddock/RData_Round2/df_all2.RData")
 df_all2 <- df
 rm(df)
 
@@ -52,8 +52,8 @@ read_and_rename_stats <- function(file) {
 
 ```{r}
 # Define the path where your text files are located (switch this to run df100 or df)
-#file_path <- "/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/"
-file_path <- "/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/"
+#file_path <- "/projects/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/"
+file_path <- "/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/"
 
 # List all text files in the directory
 sig_list_AL <- list.files(path = file_path, pattern = "sig_age_length_*", full.names = TRUE)
@@ -118,7 +118,7 @@ filter_stats <- function(df) {
   
   # Create the Loc column, filter by p.value, and store in df_filtered
   df <- df %>% unite(Loc, c("scaffold", "start"), sep = " ", remove = FALSE)
-  df_filtered <- df %>% filter(Max_Rhat > 1.010 & n_eff < 2000)
+  df_filtered <- df %>% filter(Max_Rhat < 1.010 & n_eff > 1000)
   
   # Print the number of unique Loc values in the original and filtered data frames
   cat("Unique locations in original data:", length(unique(df$Loc)), "\n")
@@ -140,28 +140,54 @@ filter_stats(df_stats_AL)
 filter_stats(df_stats_age)
 ```
 
+7-5-2026 notes for Max_Rhat < 1.010 & n_eff > 1000: 
+Unique locations in original data: 635281 
+Unique locations in filtered data: 308581 
+Filtered dataframe exported as: df_stats_AL_filtered 
+Unique locations in original data: 642346 
+Unique locations in filtered data: 406711 
+Filtered dataframe exported as: df_stats_age_filtered
+
+3-24-2026 notes 
+(Max_Rhat > 1.010 & n_eff < 2000) - OG incorrect filtering: 
+Unique locations in original data: 635281 
+Unique locations in filtered data: 213933 
+Filtered dataframe exported as: df_stats_AL_filtered 
+Unique locations in original data: 642346 
+Unique locations in filtered data: 416414 
+Filtered dataframe exported as: df_stats_age_filtered 
+
+Max_Rhat < 1.010 & n_eff > 2000 - correct filtering but conservative:
+Unique locations in original data: 635281 
+Unique locations in filtered data: 182416 
+Filtered dataframe exported as: df_stats_AL_filtered 
+Unique locations in original data: 642346 
+Unique locations in filtered data: 218667 
+Filtered dataframe exported as: df_stats_age_filtered 
+
+
 Joining those two dfs for 100% 
 
 ```{r}
-### df100 filtered4 age only (20,323 sites)
-df100_f4_age_list <- inner_join(df_stats_age_filtered, df_sig_age_filtered, 
-                            by = c("Loc", "scaffold", "start")) %>% dplyr::select(Loc) %>% distinct()
-
-df_sig_age_filtered %>% filter(Loc %in% df100_f4_age_list$Loc) %>% dplyr::select(Loc, p.value) %>% 
-  write.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_sig.csv")
-
-### df100 filtered4 age + length (7,731 sites)
-df100_f4_agelength_list <- inner_join(df_stats_AL_filtered, df_sig_AL_filtered,
-                            by = c("Loc", "scaffold", "start")) %>% dplyr::select(Loc) %>% distinct()
-
-df_sig_AL_filtered %>% filter(Loc %in% df100_f4_agelength_list$Loc) %>% dplyr::select(Loc, p.value) %>% 
-  write.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_AL_sig.csv")
-
-df100_f4_age_final <- df_all2 %>% right_join(., df100_f4_age_list, by = c("Loc"))
-df100_f4_agelength_final <- df_all2 %>% right_join(., df100_f4_agelength_list, by = c("Loc"))
-
-save(df100_f4_age_final, file = "/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_final.RData")
-save(df100_f4_agelength_final, file = "/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final.RData")
+# ### df100 filtered4 age only (20,323 sites; 7,761 sites)
+# df100_f4_age_list <- inner_join(df_stats_age_filtered, df_sig_age_filtered, 
+#                             by = c("Loc", "scaffold", "start")) %>% dplyr::select(Loc) %>% distinct()
+# 
+# df_sig_age_filtered %>% filter(Loc %in% df100_f4_age_list$Loc) %>% dplyr::select(Loc, p.value) %>% 
+#   write.csv("/projects/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_sig-7-05-2026.csv")
+# 
+# ### df100 filtered4 age + length (7,731 sites; 4,630 sites)
+# df100_f4_agelength_list <- inner_join(df_stats_AL_filtered, df_sig_AL_filtered,
+#                             by = c("Loc", "scaffold", "start")) %>% dplyr::select(Loc) %>% distinct()
+# 
+# df_sig_AL_filtered %>% filter(Loc %in% df100_f4_agelength_list$Loc) %>% dplyr::select(Loc, p.value) %>% 
+#   write.csv("/projects/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_AL_sig-7-05-2026.csv")
+# 
+# df100_f4_age_final <- df_all2 %>% right_join(., df100_f4_age_list, by = c("Loc"))
+# df100_f4_agelength_final <- df_all2 %>% right_join(., df100_f4_agelength_list, by = c("Loc"))
+# 
+# save(df100_f4_age_final, file = "/projects/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_age_final-7-05-2026.RData")
+# save(df100_f4_agelength_final, file = "/projects/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final-7-05-2026.RData")
 ```
 
 Joining those two dfs for 90% 
@@ -169,27 +195,28 @@ Joining those two dfs for 90%
 Error to troubleshoot: df_sig_age_filterd has multiple rows.. some loci went twice? Probably GLM array script issue.
 
 ```{r}
-length(unique(df_sig_age_filtered$Loc))
+length(unique(df_sig_age_filtered$Loc)) ## 192,151 total; 124,836 sites post both filters
+length(unique(df_sig_AL_filtered$Loc)) ## 140,055 total; 47,373 sites post both filters
 
-### df100 filtered4 age only (124,836 sites)
+### df filtered4 age only (124,836 sites; 66,191 sites)
 df_f4_age_list <- inner_join(df_stats_age_filtered, df_sig_age_filtered, 
                             by = c("Loc", "scaffold", "start")) %>% dplyr::select(Loc) %>% distinct()
 
 df_sig_age_filtered %>% filter(Loc %in% df_f4_age_list$Loc) %>% dplyr::select(Loc, p.value) %>% 
-  write.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_sig.csv")
+  write.csv("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_sig-7-05-2026.csv")
 
-### df100 filtered4 age + length (47,373 sites)
+### df filtered4 age + length (47,373 sites; 3-24-2026 40,251 sites)
 df_f4_agelength_list <- inner_join(df_stats_AL_filtered, df_sig_AL_filtered,
                             by = c("Loc", "scaffold", "start")) %>% dplyr::select(Loc) %>% distinct()
 
 df_sig_AL_filtered %>% filter(Loc %in% df_f4_agelength_list$Loc) %>% dplyr::select(Loc, p.value) %>% 
-  write.csv("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig.csv")
+  write.csv("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_AL_sig-7-05-2026.csv")
 
 df_f4_age_final <- df_all2 %>% right_join(., df_f4_age_list, by = c("Loc"))
 df_f4_agelength_final <- df_all2 %>% right_join(., df_f4_agelength_list, by = c("Loc"))
 
-save(df_f4_age_final, file = "/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_final.RData")
-save(df_f4_agelength_final, file = "/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_final.RData")
+save(df_f4_age_final, file = "/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_age_final-7-05-2026.RData")
+save(df_f4_agelength_final, file = "/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_final-7-05-2026.RData")
 ```
 
 

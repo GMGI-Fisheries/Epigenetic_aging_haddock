@@ -16,10 +16,21 @@ library(dplyr) ## for data transformation
 library(stringi)
 library(caret) #loads ggplot2 and lattice; needed for nearZeroVar() and findCorrelation()
 library(tidyverse) ## for data transformation
+library(plotrix)
 
 ## Load data 
 load("/work/gmgi/Fisheries/epiage/haddock/RData_Round2/df_all2.RData")
 load("/work/gmgi/Fisheries/epiage/haddock/RData_Round2/df100_all2.RData")
+
+load("/projects/gmgi/Fisheries/epiage/haddock/RData_Round2/df_all2.RData")
+load("/projects/gmgi/Fisheries/epiage/haddock/RData_Round2/df100_all2.RData")
+
+### Basic stats
+mean(df$percent.meth)
+median(df$percent.meth)
+std.error(df$percent.meth)
+hist(df$percent.meth)
+
 
 ##### 1. Removing sites with low variance
 df_spread <- df %>% dplyr::select(sample, AgeRounded, Loc, percent.meth) %>% spread(Loc, percent.meth)

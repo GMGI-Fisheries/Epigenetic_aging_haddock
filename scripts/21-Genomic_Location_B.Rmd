@@ -26,7 +26,7 @@ library(strex) ## for data transformation
 ## Read data 
 
 ```{r}
-scaffold_loci <- read.csv("data/05_age_prediction/scaffold_loci_length_df100_AL.csv")
+scaffold_loci <- read.csv("data/05_genomic_location/scaffold_loci_length_90p-8-7-2026.csv")
 ```
 
 ## Plot data from 21-Genomic_location_A

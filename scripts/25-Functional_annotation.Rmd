@@ -30,7 +30,7 @@ library(strex)
 Load data 
 
 ```{r}
-load("/work/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final.RData")
+load("/projects/gmgi/Fisheries/epiage/haddock/GLM/df100_filtered4/seq2/df100_f4_agelength_final.RData")
 head(df100_f4_agelength_final)
 length(unique(df100_f4_agelength_final$scaffold)) ## age related loci appear in 2,177 scaffolds out of ~8,420 
 
@@ -42,27 +42,30 @@ df100_f4_agelength_final <- df100_f4_agelength_final %>%
   mutate(start = as.numeric(start),
          stop = as.numeric(stop))
 
-df100_f4_agelength_final %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/full100p_data.csv")
+#df100_f4_agelength_final %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/full100p_data.csv")
 
 # ### 90% set
-# load("/work/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
-# df_f4_agelength_imputed <- results1 %>% rownames_to_column(var = "Loc") %>%
-#   gather("GMGI_ID", "percent.meth", 2:last_col()) %>%
-#   separate(Loc, c("scaffold", "position"), sep = " ", remove=FALSE) %>%
-#   mutate(position = as.numeric(position),
-#           start = position-1,
-#           stop = position+1,
-#           scaffold = str_after_nth(scaffold, "\\|", 2))
+load("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_final.RData")
+load("/projects/gmgi/Fisheries/epiage/haddock/GLM/df_filtered4/df_f4_agelength_imputed_data.RData")
+df_f4_agelength_final <- df_f4_agelength_final %>% #dplyr::select(Loc, scaffold) %>% distinct() %>%
+  separate(Loc, c("scaffold", "position"), sep = " ", remove=FALSE)  %>%
+  mutate(position = as.numeric(position),
+         position = position+1,
+         scaffold = str_after_nth(scaffold, "\\|", 2)
+         )
+
+df_90p_imputed <- results1 %>% rownames_to_column(var = "Loc") %>%
+  gather("sampleID", "percent.meth", 2:last_col())
+
+df_90p_imputed %>% write.csv("/projects/gmgi/Fisheries/epiage/haddock/full90p_data.csv")
 
 ### Final clock 111
-clock_sites <- read_csv("/work/gmgi/Fisheries/epiage/haddock/clock_sites.csv") 
+clock_sites <- read_csv("/projects/gmgi/Fisheries/epiage/haddock/clock_sites.csv") 
 clock_sites$Loc <- sub("^(([^_]*_){2}[^_]*)_", "\\1 ", clock_sites$Loc)
 clock_sites$Loc <- gsub("_", "|", clock_sites$Loc)
 
 # clock_data <- df_f4_agelength_imputed %>% filter(Loc %in% clock_sites$Loc)
 # clock_data %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/clock_data.csv")
-
-
 
 
 # ### gene overlap from genomic location 
@@ -82,7 +85,7 @@ clock_sites$Loc <- gsub("_", "|", clock_sites$Loc)
 Load gff information 
 
 ```{r}
-gff <- read.delim2("/work/gmgi/Fisheries/reference_genomes/Haddock/melAeg_maker.putative_function.domain_added.gff", header=F, skip=1) %>%
+gff <- read.delim2("/projects/gmgi/Fisheries/reference_genomes/Haddock/melAeg_maker.putative_function.domain_added.gff", header=F, skip=1) %>%
   arrange(V1)
 
 # gff_aed <- read.delim2("/work/gmgi/Fisheries/reference_genomes/Haddock/melAeg_maker.putative_function.domain_added.aed_0.5.gff", 
@@ -146,6 +149,13 @@ genic_100p_gr <- GRanges(
   ranges = IRanges(start = df100_f4_agelength_final$position, width = 1)
 )
 
+# Create GRanges objects
+genic_90p_gr <- GRanges(
+  seqnames = df_f4_agelength_final$scaffold,
+  ranges = IRanges(start = df_f4_agelength_final$position, width = 1)
+)
+
+
 ################
 
 # Create GRanges for gene regions from GFF
@@ -183,6 +193,20 @@ genic_100p_overlaps_df <- data.frame(
 
 length(unique(genic_100p_overlaps_df$Loc)) ## 3535  
 
+### 90% SET
+# Find overlaps between methylation positions and gene bodies
+genic_90p_overlaps <- findOverlaps(
+  genic_90p_gr,
+  gff_gr,
+  type = "within"  # Use "any" if you want any overlap (not fully contained)
+)
+
+genic_90p_overlaps_df <- data.frame(
+  df_f4_agelength_final[queryHits(genic_90p_overlaps), ],  # Methylation info
+  gff_edited[subjectHits(genic_90p_overlaps), ])  # Gene info
+
+length(unique(genic_90p_overlaps_df$Loc)) ## 47,370  
+
 ```
 
 
@@ -212,8 +236,6 @@ length(unique(clock_functionalanno$Loc)) ## 81
 clock_functionalanno %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/functional_clock.csv")
 ```
 
-### Protein sequences 
-
 ```{r}
 genes100p <- genic_100p_overlaps_df %>% filter(grepl("gene", feature_type)) %>% 
   separate(V9, c("ID", "Name", "Alias", "Note"), sep = ";") %>%
@@ -227,16 +249,23 @@ genes100p %>% write.csv("/work/gmgi/Fisheries/epiage/haddock/functional_100p.csv
 ```
 
 
+### Protein sequences 
+#### Identifying protein sequences 
+
 ```{r}
 #Read the protein FASTA into R
-fasta_file <- "/work/gmgi/Fisheries/reference_genomes/Haddock/melAeg_maker.putative_function.aed_0.5.proteins.fasta"
+fasta_file <- "/projects/gmgi/Fisheries/reference_genomes/Haddock/melAeg_maker.putative_function.aed_0.5.proteins.fasta"
 protein_sequences <- readAAStringSet(fasta_file)
 names(protein_sequences) <- sub("-.*", "", names(protein_sequences))
+```
 
+Clock n=111
+
+```{r}
 #### Cluster 1 genes (88)
-cluster1_genes <- read.csv("/work/gmgi/Fisheries/epiage/haddock/cluster_genelist.csv") %>% subset(cluster=="1")
+cluster1_genes <- read.csv("/projects/gmgi/Fisheries/epiage/haddock/cluster_genelist.csv") %>% subset(cluster=="1")
 #### Cluster 2 genes (54)
-cluster2_genes <- read.csv("/work/gmgi/Fisheries/epiage/haddock/cluster_genelist.csv") %>% subset(cluster=="2")
+cluster2_genes <- read.csv("/projects/gmgi/Fisheries/epiage/haddock/cluster_genelist.csv") %>% subset(cluster=="2")
 
 Cluster1_ids <- cluster1_genes$Name
 Cluster2_ids <- cluster2_genes$Name
@@ -248,14 +277,15 @@ writeXStringSet(Cluster1_matched_sequences, "/work/gmgi/Fisheries/epiage/haddock
 writeXStringSet(Cluster2_matched_sequences, "/work/gmgi/Fisheries/epiage/haddock/Cluster2_matched_sequences_proteinFASTA.fasta")
 ```
 
+100% set
 
 ```{r}
 genes100p_matched_sequences <- protein_sequences[names(protein_sequences) %in% genes100p_ids] ## 864 / 1712
 writeXStringSet(genes100p_matched_sequences, "/work/gmgi/Fisheries/epiage/haddock/Genes100p_matched_sequences_proteinFASTA.fasta")
 
 ## cluster full
-cluster1_full_genes <- read.csv("/work/gmgi/Fisheries/epiage/haddock/cluster_full_genelist.csv") %>% subset(cluster=="1")
-cluster2_full_genes <- read.csv("/work/gmgi/Fisheries/epiage/haddock/cluster_full_genelist.csv") %>% subset(cluster=="2")
+cluster1_full_genes <- read.csv("/projects/gmgi/Fisheries/epiage/haddock/cluster_100p_genelist.csv") %>% subset(cluster=="1") %>% distinct() ## 489 protein seqs from 953 genes from X loci
+cluster2_full_genes <- read.csv("/projects/gmgi/Fisheries/epiage/haddock/cluster_100p_genelist.csv") %>% subset(cluster=="2") %>% distinct() ## 559 protein seqs from 1,139 genes from X loci 
 
 cluster1_full_genes_ids <- cluster1_full_genes$Name
 cluster2_full_genes_ids <- cluster2_full_genes$Name
@@ -263,13 +293,76 @@ cluster2_full_genes_ids <- cluster2_full_genes$Name
 Cluster1_full_matched_sequences <- protein_sequences[names(protein_sequences) %in% cluster1_full_genes_ids] ## 489
 Cluster2_full_matched_sequences <- protein_sequences[names(protein_sequences) %in% cluster2_full_genes_ids] ## 559 
 
-writeXStringSet(Cluster1_full_matched_sequences, "/work/gmgi/Fisheries/epiage/haddock/Cluster1_full_matched_sequences_proteinFASTA.fasta")
-writeXStringSet(Cluster2_full_matched_sequences, "/work/gmgi/Fisheries/epiage/haddock/Cluster2_full_matched_sequences_proteinFASTA.fasta")
+writeXStringSet(Cluster1_full_matched_sequences, "/work/gmgi/Fisheries/epiage/haddock/Cluster1_100p_matched_sequences_proteinFASTA.fasta")
+writeXStringSet(Cluster2_full_matched_sequences, "/work/gmgi/Fisheries/epiage/haddock/Cluster2_100p_matched_sequences_proteinFASTA.fasta")
 ```
 
+90% set
 
+```{r}
+genes90p <- read.csv("/projects/gmgi/Fisheries/epiage/haddock/functional_90p.csv")
+genes90p_ids <- genes90p %>% dplyr::group_by(Name) %>% count() %>%  
+  filter(n > 9) %>%  
+  dplyr::select(Name)
 
+genes90p_matched_sequences <- protein_sequences[names(protein_sequences) %in% genes90p_ids$Name] 
+## all dataset: 20,388 genes and 9,271 protein sequences
+## 5+ loci: 2,004 genes and 1,397 protein sequences
+## 10+ loci: 395 genes and 291 protein sequences 
 
+writeXStringSet(genes90p_matched_sequences, "/projects/gmgi/Fisheries/epiage/haddock/Genes90p_full_matched_sequences_proteinFASTA.fasta")
+
+## cluster 90p
+############ THESE LISTS DON'T WORK; REDO GENE LIST 
+cluster1_90p_genes <- read.csv("/projects/gmgi/Fisheries/epiage/haddock/cluster_90p_genelist.csv") %>% subset(cluster=="1") %>% distinct() %>%
+  filter(Name %in% genes90p_ids$Name)
+## 14,464 genes from X loci
+## 10 CpG loci = 390 genes 
+
+cluster2_90p_genes <- read.csv("/projects/gmgi/Fisheries/epiage/haddock/cluster_90p_genelist.csv") %>% subset(cluster=="2") %>% distinct() %>%
+  filter(Name %in% genes90p_ids$Name) 
+## 9,881 genes from X loci 
+## 343 genes 
+
+cluster1_90p_genes_ids <- cluster1_90p_genes$Name
+cluster2_90p_genes_ids <- cluster2_90p_genes$Name
+
+Cluster1_90p_matched_sequences <- protein_sequences[names(protein_sequences) %in% cluster1_90p_genes_ids] 
+## 6,785 protein sequences
+
+Cluster2_90p_matched_sequences <- protein_sequences[names(protein_sequences) %in% cluster2_90p_genes_ids] 
+## 5,012 protein sequences  
+
+writeXStringSet(Cluster1_90p_matched_sequences, "/projects/gmgi/Fisheries/epiage/haddock/Cluster1_90p_full_matched_sequences_proteinFASTA.fasta")
+writeXStringSet(Cluster2_90p_matched_sequences, "/projects/gmgi/Fisheries/epiage/haddock/Cluster2_90p_full_matched_sequences_proteinFASTA.fasta")
+```
+
+### Brianna CpG loci list 
+
+```{r}
+universal <- read.csv("/projects/gmgi/Fisheries/epiage/universal_comparative_genomics/function/universal.csv") %>%
+  separate(Function, c("Name", "Alias", "Note"), sep = ";") %>%
+  mutate(Name = gsub("Name=", "", Name)) %>%
+  dplyr::select(Name) %>% distinct()
+
+universal_matched_sequences <- protein_sequences[names(protein_sequences) %in% universal$Name] 
+## 29 CpGs across 26 genes resulting in 22 protein sequences 
+
+writeXStringSet(universal_matched_sequences, "/projects/gmgi/Fisheries/epiage/haddock/Genes_universal_matched_sequences_proteinFASTA.fasta")
+
+######## 
+
+six_orders <- read.csv("/projects/gmgi/Fisheries/epiage/universal_comparative_genomics/function/six_orders.csv") %>%
+  separate(Function, c("Name", "Alias", "Note"), sep = ";") %>%
+  mutate(Name = gsub("Name=", "", Name)) %>%
+  dplyr::select(Name) %>% distinct()
+
+six_orders_matched_sequences <- protein_sequences[names(protein_sequences) %in% six_orders$Name] 
+## 712 CpGs from 491 genes resulting in 361 protein sequences
+
+writeXStringSet(six_orders_matched_sequences, "/projects/gmgi/Fisheries/epiage/haddock/Genes_six_orders_matched_sequences_proteinFASTA.fasta")
+
+```
 
 
 

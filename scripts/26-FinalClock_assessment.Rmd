@@ -26,13 +26,13 @@ library(ggpubr)
 Load data 
 
 ```{r}
-best_clock <- read.csv("data/04_age_prediction/predictions.csv")
+best_clock <- read.csv("data/04_age_prediction/predictions-8-5-2026.csv")
 meta <- read_xlsx("data/00_metadata/full_finclips_sampling.xlsx") %>% dplyr::select(Age, Trawl_ID, GMGI_ID)
 
 best_clock %>% 
   dplyr::select(GMGI_ID, Epigenetic_Age=epi.age, Otolith_age=AgeRounded, Model_Group=group, Sex, Length, Season) %>% 
   left_join(., meta, by = "GMGI_ID") %>% 
-  write_xlsx("data/04_age_prediction/Haddock_age_prediction.xlsx")
+  write_xlsx("data/04_age_prediction/Haddock_age_prediction-8-7-2026.xlsx")
 ```
 
 Calculate MAE 
@@ -102,7 +102,7 @@ mae %>% ggplot(., aes(x=group, y=mae)) +
     axis.text.y=element_text(color="black",size=10)
   )
 
-ggsave("manuscript figures/Figure2_MAE.png", width=3, height=4.5)
+ggsave("manuscript figures/Figure2_MAE.png", width=3.5, height=5)
 
 # mae %>% ggplot(., aes(x=AgeRounded, y=mae)) + 
 #   #geom_boxplot(fill=NA, aes(color=group), width=0.4, outlier.shape=NA) +
@@ -122,6 +122,35 @@ ggsave("manuscript figures/Figure2_MAE.png", width=3, height=4.5)
 #     axis.text.y=element_text(color="black",size=10)
 #   )
 ```
+
+Plotting MAE by age
+
+```{r}
+mae %>% ggplot(., aes(x=AgeRounded, y=mae)) + 
+  geom_boxplot(fill=NA, aes(color=group, group=AgeRounded), width=0.4, outlier.shape=NA) +
+  geom_point(aes(fill=group), width=0.05, color='black', shape=21, size=1.5, alpha=0.75) +
+  facet_wrap(~group) +
+  scale_fill_manual(values = c("#588157", "grey90")) +
+  scale_color_manual(values = c("#588157", "grey70")) +
+  labs(
+    y = "Mean Absolute Error (years)",
+    x = "Age (years)"
+  ) +
+  theme_bw() +
+    theme(
+    legend.position = "none",
+    strip.text = element_text(size = 10, face="bold"),
+    axis.title.y = element_text(margin=margin(t=0,r=10,b=0,l=0),size=12,face="bold"),
+    axis.title.x = element_text(margin=margin(t=10,r=0,b=0,l=0),size=12,face="bold"),
+    axis.text.x=element_text(color="black",size=10),
+    axis.text.y=element_text(color="black",size=10)
+  )
+
+ggsave("manuscript figures/Supplemental_Figure6_v2.png", width=8, height=3.5)
+```
+
+
+
 
 Rich error 
 

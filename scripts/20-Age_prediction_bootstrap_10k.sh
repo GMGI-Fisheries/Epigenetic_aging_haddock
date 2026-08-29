@@ -12,6 +12,8 @@
 # module load R/4.4.0
 
 module load anaconda3/2022.05
-source activate /home/e.strand/.conda/envs/Env_R_v2
+#source activate /home/e.strand/.conda/envs/Env_R_v2
 
-Rscript /work/gmgi/Fisheries/epiage/haddock/scripts/20-Age_prediction_bootstrap_10k.R
+source activate /projects/gmgi/miniconda3/envs/R_env
+
+Rscript /projects/gmgi/Fisheries/epiage/haddock/scripts/20-Age_prediction_bootstrap_10k.R
