@@ -36,7 +36,9 @@ metadata <- read_xlsx("../../work/gmgi/Fisheries/epiage/haddock/metadata/full_fi
 df <- left_join(df, metadata, by = "sample")
 
 ## adds a Loci specific column 
-df <- df %>% unite(Loc, c("scaffold", "start"), sep=" ", remove=F)
+df <- df %>% 
+  mutate(position=start+1) %>%
+  unite(Loc, c("scaffold", "position"), sep=" ", remove=F)
 
 ## confirm format is correct
 head(df)
@@ -62,7 +64,9 @@ df100 <- df100 %>%
 df100 <- left_join(df100, metadata, by = "sample")
 
 ## adds a Loci specific column 
-df100 <- df100 %>% unite(Loc, c("scaffold", "start"), sep=" ", remove=F)
+df100 <- df100 %>% 
+  mutate(position=start+1) %>%
+  unite(Loc, c("scaffold", "position"), sep=" ", remove=F)
 
 ## confirm format is correct
 head(df100)
